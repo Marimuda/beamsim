@@ -47,7 +47,7 @@ from beamsim.runner import Experiment, run_experiment, save_experiment
 
 # Predecessor Fig 6.3 caption: "Coverage rate here defined as when output SNR
 # is above 10 dB" (equal to the input SNR target, showing beam-alignment gain).
-GAMMA_TH_DB = 10.0
+GAMMA_TH_DB = -9.5335   # Predecessor convention (lowest E-UTRA CQI, report Sec 5.3)
 
 
 # Case A geometry constants (predecessor Section 5.2.2):

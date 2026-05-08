@@ -67,29 +67,43 @@ class NNS(Algorithm):
         self._xi: float = 0.0      # best observed magnitude threshold
         self._stack: list[tuple[int, int]] = []   # LIFO stack P
         self._initial: bool = True  # flag for first occasion
+        # Track the most recently measured (k, l) so we can read its
+        # post-measurement magnitude on the next occasion. Algorithm 4
+        # line 5 "if Y[k,l] > xi" refers to the just-measured pair, not
+        # the global BPLM argmax.
+        self._last_kl: tuple[int, int] | None = None
 
     def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:
         # Cold-start: probe the random seed pair first
         if self._initial:
             self._initial = False
-            return self._kb, self._lb
+            choice = (self._kb, self._lb)
+            self._last_kl = choice
+            return choice
 
-        # Algorithm 4 lines 5-8: if current OBP > xi, update centre
-        ok, ol = state.obp()
-        obp_mag = float(np.abs(state.observations[ok, ol]))
-        if obp_mag > self._xi:
-            self._kb, self._lb = ok, ol
-            self._xi = obp_mag
-            self._stack.clear()
+        # Algorithm 4 lines 5-8: if last-measured pair's magnitude > xi,
+        # update centre to it (steepest-ascent step).
+        if self._last_kl is not None:
+            lk, ll = self._last_kl
+            last_mag = float(np.abs(state.observations[lk, ll]))
+            if last_mag > self._xi:
+                self._kb, self._lb = lk, ll
+                self._xi = last_mag
+                self._stack.clear()
 
-        # Algorithm 4 lines 9-12: if P empty, rebuild from N(kb, lb) and reset xi
+        # Algorithm 4 lines 9-12: if P empty, rebuild from N(kb, lb).
+        # We do NOT reset xi to 0 here: that would cause the very next
+        # measurement to always satisfy Y > xi = 0 and force a spurious
+        # centre relocation, breaking the hill-climb.
         if not self._stack:
             self._rebuild_stack(state)
-            self._xi = 0.0   # Algorithm 4 line 11: xi <- 0
 
         if self._stack:
-            return self._stack.pop()   # LIFO: pop from top
-        return self._kb, self._lb
+            choice = self._stack.pop()   # LIFO: pop from top
+        else:
+            choice = (self._kb, self._lb)
+        self._last_kl = choice
+        return choice
 
     # ------------------------------------------------------------------
     # Internal helpers
