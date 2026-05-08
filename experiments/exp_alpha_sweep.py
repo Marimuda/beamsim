@@ -152,7 +152,7 @@ def run(n_trials: int, output_dir: Path, alpha_values: list[float]):
         ax.fill_between(alpha_arr, lo, hi, color=color, alpha=0.20, linewidth=0)
 
     ax.set_xlabel(r"Measurement-rate factor $\alpha$")
-    ax.set_ylabel(rf"Coverage rate (SNR$_{{out}}$ > {GAMMA_TH_DB:.0f} dB)")
+    ax.set_ylabel(rf"Coverage rate (SNR$_{{out}}$ > {GAMMA_TH_DB:.2f} dB)")
     ax.set_title(f"Case A: UMi, 1 m/s, input SNR 10 dB, n={n_trials} trials")
     ax.legend(fontsize=7, ncol=2)
     ax.grid(True, which="both", linewidth=0.3, alpha=0.4)
