@@ -1,10 +1,28 @@
-"""Experiment 3: Coverage rate vs. input SNR at 10 m/s UMi.
+"""Experiment 3 — Case A (SNR sweep): Coverage rate vs. input single-antenna SNR.
 
-Sweep single-antenna SNR over a wide range; coverage-rate threshold fixed
-at the predecessor's gamma_th = -9.5335 dB. 31 SNR points (matching the
-predecessor's "61 steps" with reduced density to keep wall time manageable;
-at 30 Monte Carlo trials and ~500 occasions per trial this completes in
-under 10 minutes on 7 cores).
+Faithfully reproduces predecessor MSc thesis Case A with SNR sweep (Section 6.4
+/ Fig 6.4 and Fig 6.5).
+
+Case A definition (predecessor Section 5.2.2) — same geometry as exp_alpha_sweep:
+  - Single UE, single BS, straight-line path — 3GPP UMi channel model.
+  - IBS = 200 m; BS at origin, UE path at y = 150 m (3/4 IBS lateral offset).
+  - Reference distance for tx_amp calibration: IBS/2 = 100 m.
+  - UE speed: 10 m/s (Fig 6.4 caption: "UE speed = 10 m/s").
+
+SNR sweep:
+  - x-axis range: -15 to +30 dB (matching predecessor Fig 6.4 x-axis extent).
+  - 46 points (1-dB steps across -15 to +30 dB); may be reduced to 31 points
+    (1.5-dB steps) via --n-snr-points for faster wall time with explicit
+    documentation trade-off.
+
+Coverage threshold: -9.53 dB (predecessor Fig 6.4 caption: "SNR threshold
+-9.53 dB", corresponding to the minimum SINR at MCS-1, Section 5.3.4
+Equation 5.21).
+
+Trial duration: 1 second = 1 000 steps at dt = 1 ms (predecessor default for
+Case A, consistent with Section 6 simulation parameters).
+
+Number of trials: 30 per SNR point.
 """
 
 from __future__ import annotations
@@ -29,18 +47,26 @@ from beamsim.plotting import (
 from beamsim.runner import Experiment, run_experiment, save_experiment
 
 
+# Predecessor Fig 6.4 caption: "coverage rate as defined in subsection 5.3.4,
+# with SNR threshold -9.53 dB" (minimum SINR at MCS-1, Equation 5.21).
 GAMMA_TH_DB = -9.5335
-DISTANCE_M = 50.0
+
+# Case A reference distance: IBS/2 = 100 m (predecessor link budget Section 3.2.6).
+DISTANCE_M = 100.0
 NOISE_AMP = 1e-3
+
+# Case A geometry: BS at origin, UE path at y = 3/4 * IBS = 150 m.
+_BS_XY = np.array([0.0, 0.0])
+_UE_PATH_Y = 150.0
+_UE_PATH_HALF_LEN = 100.0   # half of IBS = 100 m; UE traverses ±100 m along x
 
 
 def _track_factory(n_steps: int, dt: float, rng: np.random.Generator):
-    start_x = float(rng.uniform(-5.0, 5.0))
-    start_y = float(rng.uniform(-5.0, 5.0))
-    heading = float(rng.uniform(-np.pi, np.pi))
-    return straight_line_track(start_xy=(start_x, start_y),
-                                heading=heading,
-                                speed_mps=10.0,
+    # UE starts at a random position along the Case A path (+x direction).
+    start_x = float(rng.uniform(-_UE_PATH_HALF_LEN, _UE_PATH_HALF_LEN))
+    return straight_line_track(start_xy=(start_x, _UE_PATH_Y),
+                                heading=0.0,       # +x direction
+                                speed_mps=10.0,    # 10 m/s per Fig 6.4 caption
                                 n_steps=n_steps,
                                 dt=dt)
 
@@ -48,7 +74,7 @@ def _track_factory(n_steps: int, dt: float, rng: np.random.Generator):
 def _channel_factory(rng: np.random.Generator, bs_index: int):
     params = ChannelParams(ue_speed_mps=10.0)
     return ChannelRealisation(params=params,
-                               bs_xy=np.array([DISTANCE_M, 0.0]),
+                               bs_xy=_BS_XY,
                                bs_yaw=0.0,
                                n_bs_elements=16,
                                n_ue_elements=4,
@@ -78,7 +104,7 @@ def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray
             dt=dt,
             n_trials=n_trials,
             algorithms=algorithms,
-            bs_positions=[(DISTANCE_M, 0.0)],
+            bs_positions=[tuple(_BS_XY.tolist())],
             bs_yaws=[0.0],
             track_factory=partial(_track_factory, n_steps, dt),
             channel_factory=_channel_factory,
@@ -112,8 +138,8 @@ def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray
         ax.fill_between(snr_db_values, lo, hi, color=color, alpha=0.20, linewidth=0)
 
     ax.set_xlabel("Input single-antenna SNR (dB)")
-    ax.set_ylabel(rf"Coverage rate ($\gamma_{{\mathrm{{th}}}}={GAMMA_TH_DB}$ dB)")
-    ax.set_title(f"UMi LOS, 10 m/s, n_trials={n_trials}")
+    ax.set_ylabel(rf"Coverage rate ($\gamma_{{\mathrm{{th}}}}={GAMMA_TH_DB:.2f}$ dB)")
+    ax.set_title(f"Case A: UMi, 10 m/s, n_trials={n_trials}")
     ax.legend(fontsize=7, ncol=2)
     ax.grid(True, which="both", linewidth=0.3, alpha=0.4)
     ax.set_ylim(0, 1)
@@ -128,13 +154,18 @@ def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray
 
 
 def main():
-    parser = argparse.ArgumentParser()
+    parser = argparse.ArgumentParser(
+        description="Case A SNR sweep (predecessor Fig 6.4).")
     parser.add_argument("--n-trials", type=int, default=30)
-    parser.add_argument("--n-steps", type=int, default=500)
-    parser.add_argument("--n-snr-points", type=int, default=31)
+    # 1 second at 1 ms = 1 000 steps (predecessor default, Section 6).
+    parser.add_argument("--n-steps", type=int, default=1_000)
+    # 46 points = 1-dB steps over -15 to +30 dB (predecessor Fig 6.4 range).
+    # Use --n-snr-points 31 for faster runs (1.5-dB steps); note in caption.
+    parser.add_argument("--n-snr-points", type=int, default=46)
     parser.add_argument("--output", type=Path, default=Path("results"))
     args = parser.parse_args()
-    snr_grid = np.linspace(-10.0, 30.0, args.n_snr_points)
+    # x-axis spans -15 to +30 dB matching predecessor Fig 6.4.
+    snr_grid = np.linspace(-15.0, 30.0, args.n_snr_points)
     out = run(args.n_trials, args.n_steps, args.output, snr_grid)
     print(f"Wrote {out}")
 

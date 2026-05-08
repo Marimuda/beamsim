@@ -1,8 +1,25 @@
-"""Experiment 1: Mean received power vs. UE rotational velocity.
+"""Experiment 1 — Case C: Mean received power vs. UE rotational velocity.
 
-Free-space single-LOS channel, stationary UE rotating at controlled rpm.
-Reproduces the predecessor MSc thesis Fig. 5.24 (rotation case) but with
-proper Monte Carlo replication and 95% bootstrap confidence intervals.
+Faithfully reproduces predecessor MSc thesis Case C (Section 5.2.2 and
+Section 6.2 / Fig 6.2).
+
+Case C definition (predecessor Section 5.2.2):
+  - Single UE, single BS, rotation only — Free Space (LOS only, no angular
+    spread or fading).
+  - UE and BS are co-located at a "short spacing" of 10 metres.
+  - Both UE and BS rotate at the same angular velocity (same rpm).
+  - Start angle is randomised per iteration for convergence (Monte Carlo).
+  - Duration: 10 seconds per iteration (Section 5.5: "10 seconds for each
+    iteration"), i.e. n_steps = 10 000 at dt = 1 ms.
+  - Metric: mean post-combining received power in dB (noiseless scenario).
+
+rpm sweep matches Fig 6.2 x-axis tick marks: {10, 20, 40, 60, 80, 120, 180}.
+Fig 5.24 shows 5 rpm as the leftmost point; we therefore prepend 5 to the
+sweep giving {5, 10, 20, 40, 60, 80, 120, 180} — 8 log-spaced values that
+cover the range of both predecessor figures (Figs 5.24 and 6.2).
+
+Number of trials: 10, matching the original "_10_itr" filename convention.
+Users may override with --n-trials.
 """
 
 from __future__ import annotations
@@ -38,7 +55,8 @@ def _track_factory(rpm: float, n_steps: int, dt: float, rng: np.random.Generator
 
 
 def _channel_factory(rng: np.random.Generator, bs_index: int):
-    return FreeSpaceLosChannel(bs_xy=np.array([30.0, 0.0]),
+    # Case C: BS at 10 m (predecessor "short spacing", Section 5.2.2).
+    return FreeSpaceLosChannel(bs_xy=np.array([10.0, 0.0]),
                                 bs_yaw=0.0,
                                 n_bs_elements=16,
                                 n_ue_elements=4)
@@ -62,7 +80,7 @@ def run(n_trials: int, n_steps: int, output_dir: Path, rpm_values: list[float]):
             dt=dt,
             n_trials=n_trials,
             algorithms=algorithms,
-            bs_positions=[(30.0, 0.0)],
+            bs_positions=[(10.0, 0.0)],   # Case C: BS at 10 m
             bs_yaws=[0.0],
             track_factory=partial(_track_factory, rpm, n_steps, dt),
             channel_factory=_channel_factory,
@@ -101,7 +119,7 @@ def run(n_trials: int, n_steps: int, output_dir: Path, rpm_values: list[float]):
     ax.set_xscale("log")
     ax.set_xlabel("Rotational velocity (rpm)")
     ax.set_ylabel("Mean output SNR (dB)")
-    ax.set_title(f"Free-space LOS rotation, n_trials={n_trials}")
+    ax.set_title(f"Case C: free-space LOS rotation, BS=10 m, n_trials={n_trials}")
     ax.legend(fontsize=7, ncol=2)
     ax.grid(True, which="both", linewidth=0.3, alpha=0.4)
 
@@ -116,12 +134,18 @@ def run(n_trials: int, n_steps: int, output_dir: Path, rpm_values: list[float]):
 
 
 def main():
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--n-trials", type=int, default=30)
-    parser.add_argument("--n-steps", type=int, default=1000)
+    parser = argparse.ArgumentParser(
+        description="Case C: free-space rotation sweep (predecessor Fig 6.2).")
+    # Default 10 trials matches predecessor "_10_itr" naming convention.
+    parser.add_argument("--n-trials", type=int, default=10)
+    # 10 seconds at 1 ms = 10 000 steps (predecessor Section 5.5).
+    parser.add_argument("--n-steps", type=int, default=10_000)
     parser.add_argument("--output", type=Path, default=Path("results"))
     args = parser.parse_args()
-    rpm_values = [1, 2, 5, 10, 20, 50, 100, 200, 300]
+    # rpm values matching predecessor Fig 5.24 and Fig 6.2 x-axis ticks.
+    # Leftmost point in Fig 5.24 is 5 rpm; Fig 6.2 starts at 10 rpm.
+    # We include both: {5, 10, 20, 40, 60, 80, 120, 180}.
+    rpm_values = [5, 10, 20, 40, 60, 80, 120, 180]
     out = run(args.n_trials, args.n_steps, args.output, rpm_values)
     print(f"Wrote {out}")
 
