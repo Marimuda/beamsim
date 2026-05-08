@@ -64,44 +64,51 @@ class NNS(Algorithm):
         rng = np.random.default_rng()
         self._kb: int = int(rng.integers(0, state.K))
         self._lb: int = int(rng.integers(0, state.L))
-        self._xi: float = 0.0      # best observed magnitude threshold
-        self._stack: list[tuple[int, int]] = []   # LIFO stack P
-        self._initial: bool = True  # flag for first occasion
-        # Track the most recently measured (k, l) so we can read its
-        # post-measurement magnitude on the next occasion. Algorithm 4
-        # line 5 "if Y[k,l] > xi" refers to the just-measured pair, not
-        # the global BPLM argmax.
+        self._stack: list[tuple[int, int]] = []
+        # Cycle-level state: in each neighbourhood cycle we track the best
+        # neighbour seen so far. When P empties, we compare against the
+        # currently-measured centre value and steepest-ascent the centre.
+        self._cycle_best_mag: float = -np.inf
+        self._cycle_best_kl: tuple[int, int] | None = None
+        self._initial: bool = True
         self._last_kl: tuple[int, int] | None = None
 
     def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:
-        # Cold-start: probe the random seed pair first
+        # Cold-start: probe the random seed pair first to give the centre a
+        # measured magnitude before any neighbour comparison.
         if self._initial:
             self._initial = False
             choice = (self._kb, self._lb)
             self._last_kl = choice
             return choice
 
-        # Algorithm 4 lines 5-8: if last-measured pair's magnitude > xi,
-        # update centre to it (steepest-ascent step).
+        # Update best-of-cycle from the previous measurement
         if self._last_kl is not None:
             lk, ll = self._last_kl
             last_mag = float(np.abs(state.observations[lk, ll]))
-            if last_mag > self._xi:
-                self._kb, self._lb = lk, ll
-                self._xi = last_mag
-                self._stack.clear()
+            if last_mag > self._cycle_best_mag:
+                self._cycle_best_mag = last_mag
+                self._cycle_best_kl = self._last_kl
 
-        # Algorithm 4 lines 9-12: if P empty, rebuild from N(kb, lb).
-        # We do NOT reset xi to 0 here: that would cause the very next
-        # measurement to always satisfy Y > xi = 0 and force a spurious
-        # centre relocation, breaking the hill-climb.
+        # Steepest-ascent: when the cycle's neighbour pool is exhausted,
+        # compare the best neighbour against the (re-read) centre magnitude
+        # and relocate if a neighbour wins. Then rebuild P around the new
+        # (or unchanged) centre and start a fresh cycle.
         if not self._stack:
+            centre_mag = float(np.abs(state.observations[self._kb, self._lb]))
+            if (self._cycle_best_kl is not None
+                    and self._cycle_best_mag > centre_mag):
+                self._kb, self._lb = self._cycle_best_kl
+            self._cycle_best_mag = -np.inf
+            self._cycle_best_kl = None
             self._rebuild_stack(state)
-
-        if self._stack:
-            choice = self._stack.pop()   # LIFO: pop from top
-        else:
+            # Re-measure the centre at the start of each cycle so its
+            # magnitude reflects the current channel (handles UE motion).
             choice = (self._kb, self._lb)
+            self._last_kl = choice
+            return choice
+
+        choice = self._stack.pop()    # LIFO: pop from top of P
         self._last_kl = choice
         return choice
 
