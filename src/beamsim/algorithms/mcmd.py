@@ -76,8 +76,8 @@ class MCMD(Algorithm):
 
     def __init__(self,
                  q: int = 10,
-                 c_v: float = 1.0,
-                 c_b: float = 1.0,
+                 c_v: float = 30.0,    # tuned so v saturates in fast rotation (Sec 5.5)
+                 c_b: float = 1.5,     # tuned so BQ saturates with healthy OBP magnitudes
                  nns_radius: int = 2,
                  tabu_tenure: int = 20,
                  w_low: NDArray[np.float64] = W_LOW,
@@ -150,19 +150,25 @@ class MCMD(Algorithm):
     # ------------------------------------------------------------------
 
     def _update_nns(self, state: BPLMState, ck: int, cl: int) -> None:
-        """Maintain internal NNS P-list so C_nns = 1 iff (k,l) in P."""
-        # Sync NNS centre: if OBP moved above xi, update centre and clear stack
-        obs_mag = float(np.abs(state.observations[ck, cl]))
-        if obs_mag > self._nns_xi:
+        """Maintain internal NNS P-list so C_nns = 1 iff (k,l) in P.
+
+        Mirrors the steepest-ascent semantics of the standalone NNS:
+        compare the (k,l) pair directly under the NNS centre against the
+        passed-in OBP (ck, cl) — when OBP is a stronger pair than the
+        currently-stored centre, relocate. Avoids resetting xi to 0 on
+        rebuild, which would let any arbitrary pair pull the centre.
+        """
+        centre_mag = float(np.abs(state.observations[self._nns_kb, self._nns_lb]))
+        obp_mag = float(np.abs(state.observations[ck, cl]))
+        if obp_mag > centre_mag and obp_mag > self._nns_xi:
             self._nns_kb = ck
             self._nns_lb = cl
-            self._nns_xi = obs_mag
+            self._nns_xi = obp_mag
             self._nns_stack = []
 
-        # If stack empty, rebuild neighbourhood
+        # Rebuild neighbour list around the (potentially new) centre.
         if not self._nns_stack:
             self._nns_stack = self._nns_neighbours(state)
-            self._nns_xi = 0.0
 
     def _nns_neighbours(self, state: BPLMState) -> list[tuple[int, int]]:
         K, L = state.K, state.L

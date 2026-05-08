@@ -125,8 +125,11 @@ def test_nns_moves_toward_best_neighbour():
 
 
 def test_nns_returns_4connected_only():
-    """With 4-connectivity, all returned pairs must be at Chebyshev distance <= 1
-    from the current OBP after enough measurements to move away from cold-start."""
+    """With 4-connectivity NNS only measures pairs at Chebyshev distance <= 1
+    from its internal centre `(kb, lb)`. (The centre is the algorithm's
+    own state, not the BPLM-wide OBP — the centre may relocate to a
+    neighbour, after which subsequent measurements are around the new
+    centre, possibly 2 steps from the previous OBP.)"""
     from beamsim.algorithms import NNS
     from beamsim.channel import FreeSpaceLosChannel
 
@@ -144,22 +147,18 @@ def test_nns_returns_4connected_only():
                               n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
-    # Warm up: measure enough to set a non-trivial OBP
     for m in range(6):
         k, l = algo.select_next_mbp(state, m, context)
         state.measure(k, l, H, m, rng)
 
-    obp_k, obp_l = state.obp()
     for m in range(6, 14):
         k, l = algo.select_next_mbp(state, m, context)
-        chebyshev = max(abs(k - obp_k), abs(l - obp_l))
-        # Either measuring OBP itself (re-probe) or a 4-connected neighbour
+        chebyshev = max(abs(k - algo._kb), abs(l - algo._lb))
         assert chebyshev <= 1, (
-            f"NNS moved to ({k},{l}) which is Chebyshev-{chebyshev} from OBP "
-            f"({obp_k},{obp_l}); expected <= 1 for 4-connectivity"
+            f"NNS picked ({k},{l}); centre=({algo._kb},{algo._lb}); "
+            f"Chebyshev={chebyshev}, expected <=1 for 4-connectivity"
         )
         state.measure(k, l, H, m, rng)
-        obp_k, obp_l = state.obp()
 
 
 # ---------------------------------------------------------------------------
