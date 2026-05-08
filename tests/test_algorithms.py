@@ -50,6 +50,12 @@ def test_exhaustive_visits_every_pair_in_one_cycle():
 
 
 def test_ci_picks_geometry_aligned_pair():
+    """CI uses sin-space matching to handle the ULA front/back-lobe ambiguity.
+
+    For UE at origin and BS at (+10, 0), the geometric LOS aligns with the
+    array broadside in both body frames. Both UE and BS picks should fall
+    near the centre of their respective codebooks (closest beam to sin = 0).
+    """
     from beamsim.algorithms import ContextInformation
     algo = ContextInformation()
     state = make_state()
@@ -61,15 +67,11 @@ def test_ci_picks_geometry_aligned_pair():
     }
     algo.reset(state, context)
     k, l = algo.select_next_mbp(state, 0, context)
-    # AoA at UE = 0 (BS lies along +x in body frame). Expect k near middle of codebook (theta=0).
     ue_theta = state.ue_codebook.theta
     bs_theta = state.bs_codebook.theta
-    assert abs(ue_theta[k]) < ue_theta[k + 1] - ue_theta[k] + 1e-6
-    # AoD at BS = pi (UE behind BS along -x). Wrap and check that the chosen
-    # BS beam is the one whose theta matches the wrapped AoD-pi best.
-    # Codebook spans (-pi/2, pi/2); aod_rel = pi wraps to -pi which is outside
-    # the visible region — argmin will pick the extreme beam.
-    assert l in {0, state.L - 1}
+    # Both should pick the beam closest to sin = 0 (broadside on each side).
+    assert abs(np.sin(ue_theta[k])) < 0.2
+    assert abs(np.sin(bs_theta[l])) < 0.1
 
 
 # ---------------------------------------------------------------------------

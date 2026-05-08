@@ -22,18 +22,23 @@ class ContextInformation(Algorithm):
         pass
 
     def select_next_mbp(self, state, m, context):
-        ue_xy = context["ue_pose_at"](m)[0]
-        ue_yaw = context["ue_pose_at"](m)[1]
+        ue_pose = context["ue_pose_at"](m)
+        ue_xy, ue_yaw = ue_pose[0], ue_pose[1]
         bs_xy = context["bs_xy"]
         bs_yaw = context.get("bs_yaw", 0.0)
         aoa_world = np.arctan2(bs_xy[1] - ue_xy[1], bs_xy[0] - ue_xy[0])
         aod_world = np.arctan2(ue_xy[1] - bs_xy[1], ue_xy[0] - bs_xy[0])
         aoa_rel = _wrap_pi(aoa_world - ue_yaw)
         aod_rel = _wrap_pi(aod_world - bs_yaw)
-        ue_theta = state.ue_codebook.theta
-        bs_theta = state.bs_codebook.theta
-        k = int(np.argmin(np.abs(_wrap_pi(ue_theta - aoa_rel))))
-        l = int(np.argmin(np.abs(_wrap_pi(bs_theta - aod_rel))))
+        # Match in sin-space: ULA array response only depends on sin(theta),
+        # so theta and pi-theta give the same array response (front/back
+        # half-plane ambiguity). Picking by min |sin(theta_k) - sin(target)|
+        # selects the codebook beam that genuinely matches the array
+        # response, even if the target lies in the back half-plane.
+        ue_sin = np.sin(state.ue_codebook.theta)
+        bs_sin = np.sin(state.bs_codebook.theta)
+        k = int(np.argmin(np.abs(ue_sin - np.sin(aoa_rel))))
+        l = int(np.argmin(np.abs(bs_sin - np.sin(aod_rel))))
         return k, l
 
 
