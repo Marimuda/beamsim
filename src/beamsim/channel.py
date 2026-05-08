@@ -128,11 +128,12 @@ class ChannelRealisation:
                         ue_xy: NDArray[np.float64],
                         ue_yaw: float,
                         time_s: float = 0.0) -> NDArray[np.complex128]:
-        """(n_bs_elements, n_ue_elements) complex baseband channel at the UE pose.
+        """(n_ue_elements, n_bs_elements) downlink channel at the UE pose.
 
-        Magnitude is amplitude, so |y_kl|^2 with unit noise variance gives
-        effective output power scaled by the BS transmit-power normalisation
-        applied by the runner (path loss is included).
+        Convention y = w_k^H H f_l x with H in C^{N_UE x N_BS}, so the channel
+        matrix has UE rows and BS columns. Magnitude is amplitude (path loss
+        is included as an amplitude scale), so |y_kl|^2 with unit-variance
+        noise gives the receive SNR scaled by the runner's tx_amp.
         """
         # Simple time-driven blockage event: once blocked, stays blocked
         if self.is_los and not self.los_blocked and self.params.blockage_rate_per_sec > 0:
@@ -145,7 +146,7 @@ class ChannelRealisation:
                                   self.params.h_ut, los=self.is_los)
         pl_lin = 10 ** (-pl_db / 20.0)  # amplitude scaling
 
-        h = np.zeros((self.n_bs_elements, self.n_ue_elements), dtype=np.complex128)
+        h = np.zeros((self.n_ue_elements, self.n_bs_elements), dtype=np.complex128)
 
         # LOS direct path
         if self.is_los and not self.los_blocked:
@@ -156,7 +157,7 @@ class ChannelRealisation:
             a_ue = steering_vector(self.n_ue_elements, aoa_rel)
             a_bs = steering_vector(self.n_bs_elements, aod_rel)
             los_amp = pl_lin * np.sqrt(self.k_lin / (1 + self.k_lin))
-            h += los_amp * np.outer(a_bs, a_ue.conj())
+            h += los_amp * np.outer(a_ue, a_bs.conj())
 
         # NLOS cluster contributions
         nlos_total_amp = pl_lin / np.sqrt(1 + self.k_lin) if self.is_los else pl_lin
@@ -172,7 +173,7 @@ class ChannelRealisation:
                 a_ue = steering_vector(self.n_ue_elements, aoa_rel)
                 a_bs = steering_vector(self.n_bs_elements, aod_rel)
                 ray_amp = cluster_amp * self.sub_ray_phases[c, r] / np.sqrt(self.params.n_rays_per_cluster)
-                h += ray_amp * np.outer(a_bs, a_ue.conj())
+                h += ray_amp * np.outer(a_ue, a_bs.conj())
         return h
 
     def los_aoa_world(self, ue_xy: NDArray[np.float64]) -> float:
@@ -203,4 +204,4 @@ class FreeSpaceLosChannel:
         aod_world = np.arctan2(ue_xy[1] - self.bs_xy[1], ue_xy[0] - self.bs_xy[0])
         a_ue = steering_vector(self.n_ue_elements, _wrap_pi(aoa_world - ue_yaw))
         a_bs = steering_vector(self.n_bs_elements, _wrap_pi(aod_world - self.bs_yaw))
-        return np.outer(a_bs, a_ue.conj())
+        return np.outer(a_ue, a_bs.conj())

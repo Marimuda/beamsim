@@ -24,7 +24,7 @@ def test_freespace_los_channel_shape():
     ch = FreeSpaceLosChannel(bs_xy=np.array([10.0, 0.0]), bs_yaw=0.0,
                               n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
-    assert H.shape == (16, 4)
+    assert H.shape == (4, 16)
     # Pure LOS rank-1 outer product => |H|_F^2 = 1 (unit gain)
     np.testing.assert_allclose(np.linalg.norm(H), 1.0, atol=1e-9)
 
