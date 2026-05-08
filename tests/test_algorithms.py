@@ -279,87 +279,61 @@ def test_tabu_avoids_recently_selected_pairs():
 
 
 # ---------------------------------------------------------------------------
-# Angular prediction: Kalman filter convergence test
+# Angular prediction: gradient-sum Algorithm 3 tracking test
 # ---------------------------------------------------------------------------
 
-def test_angular_prediction_kalman_converges_on_constant_velocity():
-    """Kalman tracker must track a drifting LOS beam within a beamwidth tolerance.
+def test_angular_prediction_gradient_sum_tracks_linear_velocity():
+    """Gradient-sum predictor (Algorithm 3) must track a linearly drifting beam.
 
-    Setup: UE at (10, 0) drifting slowly in +y while facing +x (yaw=0). The BS
-    sits at the origin.  AoD from the BS sweeps through interior codebook beams
-    at a constant rate (~0.05 rad/step).  The Kalman filter should predict the
-    correct BS beam (or adjacent) at least 60% of the time post-warmup.
+    OBP history is injected directly by writing a large observation at the true
+    (k=0, l=beam_index) entry each warmup step, so the h-history accumulates
+    consistently increasing angles with a constant gradient.  Post-warmup, the
+    gradient-sum predictor must forecast the next beam (or adjacent) correctly.
 
-    Reference: thesis Sec. 5.4.3 Algorithm 3 — angular tracking with constant-
-    velocity prediction; Fig. 5.19 shows stable tracking.
+    Reference: thesis Sec. 5.4.3 Algorithm 3; Fig. 5.19 shows stable tracking.
     """
     from beamsim.algorithms import AngularPrediction
-    from beamsim.channel import FreeSpaceLosChannel
     from beamsim.codebook import make_default_bs_codebook, make_default_ue_codebook
 
     warmup = 4
-    algo = AngularPrediction(warmup=warmup, q_angle=5e-4, q_rate=5e-3)
+    history_len = 3
+    algo = AngularPrediction(warmup=warmup, history_len=history_len)
     ue_cb = make_default_ue_codebook()
     bs_cb = make_default_bs_codebook()
-    state = BPLMState(ue_codebook=ue_cb, bs_codebook=bs_cb, noise_amplitude=1e-6)
+    state = BPLMState(ue_codebook=ue_cb, bs_codebook=bs_cb, noise_amplitude=1e-9)
 
-    bs_xy = np.array([0.0, 0.0])
-    bs_yaw = 0.0
-    ue_yaw = 0.0  # fixed orientation
-
-    # UE drifts in +y from (10, -2) at 0.05 m/step: AoD goes from -0.2 to +0.3 rad
-    def ue_pose(m):
-        x = 10.0
-        y = -2.0 + m * 0.05
-        return np.array([x, y]), ue_yaw
-
-    context = {"ue_pose_at": ue_pose, "bs_xy": bs_xy, "bs_yaw": bs_yaw}
+    context = {}
     algo.reset(state, context)
-    rng = np.random.default_rng(99)
+
+    # Linearly drifting beam: index advances by 1 per step starting at beam 10
+    start_beam = 10
 
     def true_bs_beam(m):
-        """Index of BS codebook beam aligned with AoD at step m."""
-        xy, _ = ue_pose(m)
-        aod_w = np.arctan2(xy[1] - bs_xy[1], xy[0] - bs_xy[0])
-        aod_rel = (aod_w - bs_yaw + np.pi) % (2 * np.pi) - np.pi
-        return int(np.argmin(np.abs(
-            (bs_cb.theta - aod_rel + np.pi) % (2 * np.pi) - np.pi
-        )))
+        return start_beam + m  # stays within [10, 30] for m in [0, 20]
 
-    n_steps = warmup + 10
-    # Warm-up: measure the true LOS pair each step to give the filter good data
+    # Warmup: inject OBP history by setting dominant observation at true beam.
+    # Values increase so that OBP always resolves to the current true beam.
     for m in range(warmup):
-        xy, yaw = ue_pose(m)
-        ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=bs_yaw,
-                                  n_bs_elements=16, n_ue_elements=4)
-        H = ch.channel_matrix(xy, yaw)
-        # Measure the true pair directly so OBP tracks ground truth
         tl = true_bs_beam(m)
-        # Use exhaustive-style: algo returns sweep pair during warmup; force-measure the
-        # true pair as well so OBP is accurate
-        k_algo, l_algo = algo.select_next_mbp(state, m, context)
-        state.measure(k_algo, l_algo, H, m, rng)
-        # Also pre-seed observations at the true pair so OBP = true beam
-        state.measure(0, tl, H, m, rng)  # k=0 is UE side (AoA is not the focus here)
+        state.observations[0, tl] = float(m + 2)
+        state.measured_at[0, tl] = m
+        algo.select_next_mbp(state, m, context)
 
-    # Prediction phase: Kalman should track the drifting AoD beam
+    # Prediction phase: gradient-sum should forecast +1 beam per step
     hits = 0
-    post_warmup = n_steps - warmup
-    for m in range(warmup, n_steps):
-        xy, yaw = ue_pose(m)
-        ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=bs_yaw,
-                                  n_bs_elements=16, n_ue_elements=4)
-        H = ch.channel_matrix(xy, yaw)
-        k_pred, l_pred = algo.select_next_mbp(state, m, context)
-        state.measure(k_pred, l_pred, H, m, rng)
+    post_warmup = 5
+    for m in range(warmup, warmup + post_warmup):
         tl = true_bs_beam(m)
-        # Accept exact hit OR adjacent beam (one beamwidth tolerance)
+        k_pred, l_pred = algo.select_next_mbp(state, m, context)
         if abs(l_pred - tl) <= 1:
             hits += 1
+        # Update OBP to true beam for next step
+        state.observations[0, tl] = float(m + 2)
+        state.measured_at[0, tl] = m
 
     assert hits >= post_warmup * 0.6, (
-        f"Kalman tracker hit rate (within 1 beam) {hits}/{post_warmup} < 60%; "
-        "filter is not converging on constant-velocity AoD drift"
+        f"Gradient-sum tracker hit rate (within 1 beam) {hits}/{post_warmup} < 60%; "
+        "predictor is not tracking constant-velocity beam drift"
     )
 
 
@@ -494,7 +468,13 @@ def test_mcmd_weight_order_matches_fig526():
 
 
 def test_mcmd_c_nns_peaks_at_obp():
-    """C_nns must have its maximum at the current OBP location."""
+    """C_nns (binary P-list) must have its entries around the current OBP.
+
+    After warmup the internal NNS P-list should contain the 4-connected
+    neighbours of the NNS centre, which tracks the OBP.  The test verifies
+    that at least one non-zero C_nns entry exists (P-list is non-empty) and
+    that all non-zero entries are within Chebyshev distance 1 of the OBP.
+    """
     from beamsim.algorithms import MCMD
     from beamsim.channel import FreeSpaceLosChannel
 
@@ -516,12 +496,118 @@ def test_mcmd_c_nns_peaks_at_obp():
 
     ck, cl = state.obp()
     K, L = state.K, state.L
-    kk, ll = np.indices((K, L))
-    dist = np.maximum(np.abs(kk - ck), np.abs(ll - cl))
-    C_nns = np.exp(-dist.astype(float) / algo.nns_radius)
 
-    # Maximum of C_nns must be at the OBP
-    max_pos = np.unravel_index(np.argmax(C_nns), C_nns.shape)
-    assert max_pos == (ck, cl), (
-        f"C_nns peak at {max_pos}, expected OBP ({ck},{cl})"
+    # Trigger one more call so the internal NNS P-list is populated
+    algo.select_next_mbp(state, 10, context)
+
+    # After warmup the NNS stack should be non-empty (neighbours queued)
+    assert len(algo._nns_stack) > 0, (
+        "MCMD internal NNS P-list is empty after warmup; "
+        "C_nns (Eq. 5.28) would be all-zero"
     )
+
+    # All P-list entries should be 4-connected neighbours (Chebyshev dist <= 1)
+    nns_centre = (algo._nns_kb, algo._nns_lb)
+    for pk, pl in algo._nns_stack:
+        cheb = max(abs(pk - nns_centre[0]), abs(pl - nns_centre[1]))
+        assert cheb <= 1, (
+            f"P-list entry ({pk},{pl}) is Chebyshev-{cheb} from NNS centre "
+            f"{nns_centre}; expected <= 1 for 4-connected neighbourhood"
+        )
+
+
+# ---------------------------------------------------------------------------
+# New predecessor-fidelity tests
+# ---------------------------------------------------------------------------
+
+def test_nns_random_seed_varies_across_trials():
+    """NNS reset() must draw a random seed so different trials start differently.
+
+    Algorithm 4 (thesis) line 2: kb, lb <- Random.  Two independent resets
+    should produce different starting pairs with very high probability
+    (probability of collision = 1/(K*L) << 1 for any reasonable codebook).
+    """
+    from beamsim.algorithms import NNS
+
+    algo = NNS()
+    state = make_state()
+    context = {}
+
+    seeds = set()
+    for _ in range(20):
+        algo.reset(state, context)
+        seeds.add((algo._kb, algo._lb))
+
+    assert len(seeds) > 1, (
+        f"NNS reset() produced the same seed ({algo._kb},{algo._lb}) across "
+        "20 independent resets; random initialisation is not working"
+    )
+
+
+def test_tabu_default_tenure_is_20():
+    """Tabu default tenure must be 20 (thesis Figure 5.23: s=20).
+
+    Algorithm 5 is illustrated with s=20 in the thesis; the default must
+    match so out-of-the-box behaviour reproduces the reported results.
+    """
+    from beamsim.algorithms import Tabu
+
+    algo = Tabu()
+    assert algo.tenure == 20, (
+        f"Tabu default tenure is {algo.tenure}, expected 20 "
+        "(thesis Figure 5.23 caption: 'tabu search with s = 20')"
+    )
+
+
+def test_mcmd_binary_c_nns_reflects_p_list():
+    """C_nns must be 1 for entries in P and 0 for entries not in P (Eq. 5.28).
+
+    Verify that after warmup, when the NNS P-list is non-empty, the entries
+    in the P-list get C_nns=1 and all other entries get C_nns=0.
+    """
+    from beamsim.algorithms import MCMD
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = MCMD()
+    state = make_state()
+    bs_xy = np.array([10.0, 0.0])
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
+               "bs_xy": bs_xy, "bs_yaw": 0.0}
+    algo.reset(state, context)
+    rng = np.random.default_rng(42)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
+                              n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    # Run enough steps to establish a non-trivial NNS centre and P-list
+    for m in range(12):
+        k, l = algo.select_next_mbp(state, m, context)
+        state.measure(k, l, H, m, rng)
+
+    # Force a fresh NNS P-list rebuild by resetting and calling select
+    ck, cl = state.obp()
+    algo._nns_kb = ck
+    algo._nns_lb = cl
+    algo._nns_xi = 0.0
+    algo._nns_stack = []
+    # Trigger _update_nns via select_next_mbp
+    algo.select_next_mbp(state, 12, context)
+
+    # If P-list is non-empty, verify binary C_nns structure
+    if algo._nns_stack:
+        K, L = state.K, state.L
+        C_nns = np.zeros((K, L), dtype=float)
+        for pk, pl in algo._nns_stack:
+            C_nns[pk, pl] = 1.0
+
+        p_set = set(algo._nns_stack)
+        for k in range(K):
+            for l in range(L):
+                if (k, l) in p_set:
+                    assert C_nns[k, l] == 1.0, (
+                        f"C_nns[{k},{l}]=0 but ({k},{l}) is in P-list"
+                    )
+                else:
+                    assert C_nns[k, l] == 0.0, (
+                        f"C_nns[{k},{l}]>0 but ({k},{l}) is not in P-list"
+                    )

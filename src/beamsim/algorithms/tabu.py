@@ -1,80 +1,73 @@
-"""Tabu search around the OBP — Glover (1989) classical formulation.
+"""Tabu search around the OBP.
 
-Implements the Tabu Search beam-alignment algorithm described in the
-predecessor MSc thesis (Kristmundsson & Syberg, 2018), Section 5.4.5,
-Algorithm 5 (pp. 67-68), extended with Glover's classical tabu-search
-aspiration criterion and a diversification restart.
+Implements Algorithm 5 from the predecessor MSc thesis
+(Kristmundsson & Syberg, 2018), Section 5.4.5 (pp. 67-68), with optional
+Glover aspiration and diversification as extensions.
 
-Algorithm outline (Algorithm 5 in the thesis):
-  - Maintain a tabu matrix T of size K x L.  T(k,l) < 0 means (k,l) is tabu.
-  - Each call, push N(OBP) into a measurement queue P (same as NNS).
-  - Pop the next (k,l) from P.  If tabu (T<0), skip to the closest non-tabu
-    pair to the OBP (line 18 of Algorithm 5).
-  - After measuring, decrement T everywhere, reset T(k,l) to -s for the
-    chosen pair (s = tenure length), making it tabu for s occasions.
+Algorithm 5 (thesis, p. 68):
+  1. if Initial Step: kb, lb <- Random, T <- zeros(K,L)
+  2. if Size P == 0:
+       Push N(kb, lb) into P
+       xi <- 0
+  3. if Y[k,l] > xi:
+       kb, lb <- k, l
+       xi <- Y[k,l]
+  4. if [k,l] == top of P: delete [k,l] from top of P
+  5. [k,l] <- top of P  (read without deleting)
+  6. T <- T + 1, T(T > 0) <- 0     # increment, cap at 0
+  7. if T[k,l] < 0:
+       k,l <- argmin_{{T=0}} ||[k_hat,l_hat] - [k,l]||  (closest non-tabu)
+  8. T[k,l] <- -s                   # make tabu for s steps
 
-Upgrades beyond the thesis Algorithm 5:
-  1. Aspiration (Glover 1989): if a tabu candidate's *observed* magnitude
-     already exceeds the current global best observed magnitude, take it
-     regardless of tabu status.  This prevents discarding a pair that is
-     provably better than anything seen so far.
-  2. Diversification: every D steps (default D=50), jump to a uniformly
-     random pair that is not tabu.  This escapes long-running local regions
-     per Glover (1989) Section 4.
+Where T is the tabu matrix (0 = free, negative = tabu), s is the tenure.
+Default tenure s = 20 (thesis Figure 5.23 caption).
 
-Scoring of non-tabu candidates combines:
-  - Staleness (age = m - measured_at): prefer older measurements (more
-    information gain).
-  - Proximity to OBP: prefer closer pairs (hill-climbing spirit of NNS).
-  Score = age_weight * age_norm + (1 - age_weight) * proximity_norm.
+Neighbourhood: 4-connected (same pattern A as NNS, Fig. 5.22).
+The report's Algorithm 5 uses "N(kb,lb)" which is identical to NNS's
+4-connected neighbourhood.
+
+Extensions beyond Algorithm 5 (kept as configurable):
+  - Aspiration (Glover 1989): if a tabu entry's observed magnitude exceeds
+    the current global best, admit it regardless of tabu status.
+  - Diversification: periodic random jump to escape long-running local regions.
 
 References:
-  Glover, F. (1989). "Tabu Search — Part I". ORSA Journal on Computing,
-    1(3), 190-206.
-  Gao, X. et al. (2016). Tabu-search-inspired beam tracking for mmW systems
-    [referenced as [42] in the thesis, Section 5.4.1].
   Kristmundsson & Syberg (2018), WCS10-951, Section 5.4.5, Algorithm 5,
-    Figures 5.23 (pp. 67-68).
+  Figures 5.23 (pp. 67-68).
 """
 
 from __future__ import annotations
-
-from collections import deque
 
 import numpy as np
 
 from beamsim.algorithms.base import Algorithm
 from beamsim.bplm import BPLMState
 
+_4CONNECTED = [(0, 1), (0, -1), (1, 0), (-1, 0)]
+
 
 class Tabu(Algorithm):
-    """Tabu search with rigorous aspiration and periodic diversification.
+    """Tabu search (Algorithm 5, thesis Sec. 5.4.5).
 
     Parameters
     ----------
     tenure : int
-        Number of occasions a pair stays tabu after being chosen (s in
-        Algorithm 5 of the thesis).  Default 8.
-    radius : int
-        Chebyshev radius defining the neighbourhood N(OBP).  Default 2.
+        Tabu tenure s: occasions a chosen pair stays tabu.  Default 20.
     age_weight : float
-        Weight [0, 1] for staleness in the non-tabu candidate scoring.
-        1 - age_weight is given to proximity.  Default 0.5.
+        Weight [0,1] for staleness in non-tabu scoring (extension).
     diversification_period : int
-        Every this many calls, jump to a random non-tabu pair if no
-        neighbourhood candidate improves on the global best.  D ≈ 50 per
-        Glover (1989) Section 4.  Set to 0 to disable.  Default 50.
+        Periodic random jump every D calls (0 = disabled).  Default 50.
     """
 
     name = "tabu"
 
     def __init__(self,
-                 tenure: int = 8,
-                 radius: int = 2,
+                 tenure: int = 20,
+                 radius: int = 1,          # kept for API compatibility; report uses 4-conn
                  age_weight: float = 0.5,
                  diversification_period: int = 50):
         self.tenure = tenure
-        self.radius = radius
+        self.radius = radius               # ignored internally — always 4-connected
         self.age_weight = float(age_weight)
         self.diversification_period = diversification_period
 
@@ -84,52 +77,48 @@ class Tabu(Algorithm):
 
     def reset(self, state: BPLMState, context: dict) -> None:
         K, L = state.K, state.L
-        # Tabu matrix: 0 = not tabu; negative value counts down to expiry.
+        # Algorithm 5 line 1: T <- zeros(K,L)
         self._T: np.ndarray = np.zeros((K, L), dtype=np.int64)
         self._global_best_mag: float = 0.0
         self._call_count: int = 0
+        # Initialise with random seed (Algorithm 5 line 1: kb, lb <- Random)
+        rng = np.random.default_rng()
+        self._kb: int = int(rng.integers(0, K))
+        self._lb: int = int(rng.integers(0, L))
+        self._xi: float = 0.0
+        self._stack: list[tuple[int, int]] = []
+        self._initial: bool = True
 
     def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:
         self._call_count += 1
 
-        # Advance all tabu counters (one step closer to expiry)
+        # Algorithm 5 line 16: T <- T + 1, T(T > 0) <- 0
         self._T[self._T < 0] += 1
 
         K, L = state.K, state.L
         obs_mag = np.abs(state.observations)
 
-        # Update global best from all entries that have been measured so far.
-        # This must happen FIRST so that aspiration_threshold captures the true
-        # best BEFORE this call's selection (Glover 1989: aspiration = "would
-        # beat the incumbent if accepted NOW").
+        # Update global best (for aspiration extension)
         measured_mask = state.measured_at >= 0
         if measured_mask.any():
             measured_max = float(obs_mag[measured_mask].max())
             if measured_max > self._global_best_mag:
                 self._global_best_mag = measured_max
 
-        # Without any measurements, return a round-robin seed
+        # Cold start: return seed before any measurements
         if not np.any(measured_mask):
-            choice = (0, 0)
-            self._make_tabu(choice)
+            if self._initial:
+                self._initial = False
+                choice = (self._kb, self._lb)
+                self._T[choice] = -self.tenure
+                return choice
+            choice = (self._kb, self._lb)
+            self._T[choice] = -self.tenure
             return choice
 
-        # Aspiration criterion (Glover 1989): a candidate is admitted if its
-        # *observed* magnitude exceeds the best magnitude updated above.
-        # We use the CURRENT global best as the threshold — any tabu pair that
-        # already exceeds it (because the channel shifted) is accepted.
+        # --- Aspiration extension (Glover 1989) ---
+        # Check if any tabu entry beats the current global best observed magnitude.
         aspiration_threshold = self._global_best_mag
-
-        ck, cl = state.obp()
-
-        # --- Global aspiration check (Glover 1989) ---
-        # Before restricting to the neighbourhood, check if ANY tabu entry's
-        # observed magnitude exceeds the pre-call global best.  This handles
-        # the case where the OBP itself is tabu (it is excluded from the
-        # neighbourhood, so a neighbourhood-only check would miss it).
-        #
-        # We scan all tabu entries and pick the one with the highest magnitude
-        # that exceeds the threshold.  This is O(K*L) but K*L is small (<300).
         tabu_ks, tabu_ls = np.where(self._T < 0)
         if tabu_ks.size > 0:
             tabu_mags = obs_mag[tabu_ks, tabu_ls]
@@ -137,36 +126,53 @@ class Tabu(Algorithm):
             if tabu_mags[best_tabu_idx] > aspiration_threshold:
                 choice = (int(tabu_ks[best_tabu_idx]), int(tabu_ls[best_tabu_idx]))
                 self._global_best_mag = float(tabu_mags[best_tabu_idx])
-                self._make_tabu(choice)
+                self._T[choice] = -self.tenure
                 return choice
 
-        # Build candidate list from square neighbourhood of OBP
-        candidates = self._neighbourhood(ck, cl, K, L)
-        if not candidates:
-            choice = (ck, cl)
-            self._make_tabu(choice)
-            return choice
+        # Algorithm 5 lines 8-11: if Y[k,l] > xi, update centre
+        ok, ol = state.obp()
+        obp_mag = float(obs_mag[ok, ol])
+        if obp_mag > self._xi:
+            self._kb, self._lb = ok, ol
+            self._xi = obp_mag
+            self._stack.clear()
 
-        # --- Non-tabu candidates ---
-        non_tabu = [c for c in candidates if not self._is_tabu(c)]
+        # Algorithm 5 lines 4-7: if P empty, rebuild N(kb, lb) and reset xi
+        if not self._stack:
+            self._rebuild_stack(state)
+            self._xi = 0.0
 
-        if non_tabu:
-            choice = self._best_candidate(non_tabu, ck, cl, obs_mag, m, state)
+        # Algorithm 5 lines 12-15: delete measured entry from top of P
+        if self._stack:
+            top = self._stack[-1]
+            if top == (ok, ol):
+                self._stack.pop()
+                if not self._stack:
+                    self._rebuild_stack(state)
+                    self._xi = 0.0
+
+        # Read next candidate from top of stack (without deleting)
+        if self._stack:
+            k, l = self._stack[-1]
         else:
-            # All neighbours tabu: thesis Algorithm 5 line 18 — pick non-tabu
-            # pair closest (L2) to OBP across the entire codebook.
-            choice = self._closest_non_tabu(ck, cl, K, L)
+            k, l = self._kb, self._lb
 
-        # --- Diversification (Glover 1989 Section 4) ---
+        # Algorithm 5 lines 17-19: if tabu, find closest non-tabu to OBP
+        if self._T[k, l] < 0:
+            k, l = self._closest_non_tabu(self._kb, self._lb, K, L)
+
+        # --- Diversification extension (Glover 1989) ---
         if (self.diversification_period > 0
                 and self._call_count % self.diversification_period == 0):
             rng = np.random.default_rng()
             free = list(zip(*np.where(self._T >= 0)))
             if free:
                 idx = rng.integers(len(free))
-                choice = free[idx]
+                k, l = int(free[idx][0]), int(free[idx][1])
 
-        self._make_tabu(choice)
+        choice = (k, l)
+        # Algorithm 5 line 20: T[k,l] <- -s
+        self._T[choice] = -self.tenure
         return choice
 
     # ------------------------------------------------------------------
@@ -174,52 +180,23 @@ class Tabu(Algorithm):
     # ------------------------------------------------------------------
 
     def _neighbourhood(self, ck: int, cl: int, K: int, L: int) -> list[tuple[int, int]]:
+        """4-connected neighbourhood (Algorithm 5 / Fig. 5.22 pattern A)."""
         result = []
-        for dk in range(-self.radius, self.radius + 1):
-            for dl in range(-self.radius, self.radius + 1):
-                if dk == 0 and dl == 0:
-                    continue
-                nk, nl = ck + dk, cl + dl
-                if 0 <= nk < K and 0 <= nl < L:
-                    result.append((nk, nl))
+        for dk, dl in _4CONNECTED:
+            nk, nl = ck + dk, cl + dl
+            if 0 <= nk < K and 0 <= nl < L:
+                result.append((nk, nl))
         return result
 
-    def _is_tabu(self, pair: tuple[int, int]) -> bool:
-        return bool(self._T[pair] < 0)
-
-    def _make_tabu(self, pair: tuple[int, int]) -> None:
-        self._T[pair] = -self.tenure
-
-    def _best_candidate(self,
-                        pool: list[tuple[int, int]],
-                        ck: int, cl: int,
-                        obs_mag: np.ndarray,
-                        m: int,
-                        state: BPLMState) -> tuple[int, int]:
-        """Score candidates by staleness + proximity, pick highest score."""
-        ages = np.array([
-            (m - state.measured_at[p]) if state.measured_at[p] >= 0 else (m + 1)
-            for p in pool
-        ], dtype=float)
-        dists = np.array([
-            np.sqrt((p[0] - ck) ** 2 + (p[1] - cl) ** 2)
-            for p in pool
-        ], dtype=float)
-
-        age_max = ages.max() + 1e-12
-        dist_max = dists.max() + 1e-12
-
-        age_norm = ages / age_max
-        prox_norm = 1.0 - dists / dist_max   # closer = higher
-
-        scores = self.age_weight * age_norm + (1.0 - self.age_weight) * prox_norm
-        return pool[int(np.argmax(scores))]
+    def _rebuild_stack(self, state: BPLMState) -> None:
+        neighbours = self._neighbourhood(self._kb, self._lb, state.K, state.L)
+        self._stack = list(neighbours)
 
     def _closest_non_tabu(self, ck: int, cl: int, K: int, L: int) -> tuple[int, int]:
-        """Return the non-tabu (k, l) with smallest L2 distance to (ck, cl)."""
+        """argmin_{T=0} ||[k_hat,l_hat] - [k,l]|| — Algorithm 5 line 18."""
         kk, ll = np.where(self._T >= 0)
         if kk.size == 0:
-            # Entire codebook is tabu — reset and return OBP
+            # Entire codebook tabu — reset and return centre
             self._T[:] = 0
             return ck, cl
         dists = np.sqrt((kk - ck) ** 2 + (ll - cl) ** 2)
