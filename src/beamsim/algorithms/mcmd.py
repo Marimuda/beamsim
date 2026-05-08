@@ -94,7 +94,10 @@ class MCMD(Algorithm):
         # Proper tabu matrix (thesis Algorithm 5, T initialised to zeros(K,L))
         # Negative entries = tabu; 0 = free.
         self._T: NDArray[np.int64] = np.zeros((K, L), dtype=np.int64)
-        self._snapshots: deque[NDArray[np.complex128]] = deque(maxlen=self.q + 1)
+        # Window length q+2 in snapshots gives q+1 consecutive-pair diffs,
+        # so np.mean() over the diff list divides by q+1 = report's (l+1)
+        # in Eq. 5.32. Matches the BQ window in Eq. 5.33 the same way.
+        self._snapshots: deque[NDArray[np.complex128]] = deque(maxlen=self.q + 2)
         self._bq_history: deque[float] = deque(maxlen=self.q + 1)
 
     # ------------------------------------------------------------------
