@@ -481,37 +481,54 @@ class ChannelRealisation:
             h += los_amp * los_doppler * np.outer(a_ue, a_bs.conj())
 
         # ------------------------------------------------------------------
-        # NLOS cluster contributions
+        # NLOS cluster contributions (vectorised over all sub-rays)
         # ------------------------------------------------------------------
         nlos_total_amp = pl_lin / np.sqrt(1.0 + self.k_lin) if self.is_los else pl_lin
 
         n_cl = len(self.cluster_powers)
-        for c in range(n_cl):
-            sc = self.scatterer_xy[c]
-            aoa_world_c = np.arctan2(sc[1] - ue_xy[1], sc[0] - ue_xy[0])
-            aod_world_c = np.arctan2(sc[1] - self.bs_xy[1], sc[0] - self.bs_xy[0])
+        nr = self.params.n_rays_per_cluster
 
-            # Blockage attenuation (simplified §7.6.4.1)
-            blk_amp = 10 ** (-self._blockage_attn_db[c] / 20.0)
+        # Per-cluster world AoA / AoD (length n_cl).
+        sc_x = self.scatterer_xy[:, 0]
+        sc_y = self.scatterer_xy[:, 1]
+        aoa_world_c = np.arctan2(sc_y - ue_xy[1], sc_x - ue_xy[0])
+        aod_world_c = np.arctan2(sc_y - self.bs_xy[1], sc_x - self.bs_xy[0])
 
-            cluster_amp = nlos_total_amp * np.sqrt(self.cluster_powers[c]) * blk_amp
+        # Per-cluster amplitude (n_cl,), broadcast to (n_cl, nr).
+        blk_amp = 10 ** (-self._blockage_attn_db / 20.0)
+        cluster_amp = nlos_total_amp * np.sqrt(self.cluster_powers) * blk_amp  # (n_cl,)
 
-            nr = self.params.n_rays_per_cluster
-            for r in range(nr):
-                aoa_rel = _wrap_pi(aoa_world_c + self.sub_ray_aoa_offsets[c, r] - ue_yaw)
-                aod_rel = _wrap_pi(aod_world_c + self.sub_ray_aod_offsets[c, r] - self.bs_yaw)
-                a_ue = steering_vector(self.n_ue_elements, aoa_rel)
-                a_bs = steering_vector(self.n_bs_elements, aod_rel)
+        # Sub-ray relative angles: (n_cl, nr).
+        aoa_rel = _wrap_pi(aoa_world_c[:, None] + self.sub_ray_aoa_offsets - ue_yaw)
+        aod_rel = _wrap_pi(aod_world_c[:, None] + self.sub_ray_aod_offsets - self.bs_yaw)
 
-                # Doppler phase: f_D = (v · k_nm) / lambda
-                # k_nm = unit vector toward scatterer sub-ray direction
-                ray_angle = aoa_world_c + self.sub_ray_aoa_offsets[c, r]
-                doppler_phase = _ray_doppler_phase(ray_angle, p.ue_speed_mps,
-                                                   ue_yaw, lam, time_s)
+        # Steering vectors over all sub-rays simultaneously.
+        n_ue_idx = np.arange(self.n_ue_elements)
+        n_bs_idx = np.arange(self.n_bs_elements)
+        # a_ue: (n_cl*nr, n_ue) ; a_bs: (n_cl*nr, n_bs)
+        sin_aoa = np.sin(aoa_rel).reshape(-1)
+        sin_aod = np.sin(aod_rel).reshape(-1)
+        phase_ue = -2.0 * np.pi * 0.5 * np.outer(sin_aoa, n_ue_idx)
+        phase_bs = -2.0 * np.pi * 0.5 * np.outer(sin_aod, n_bs_idx)
+        a_ue_all = np.exp(1j * phase_ue) / np.sqrt(self.n_ue_elements)
+        a_bs_all = np.exp(1j * phase_bs) / np.sqrt(self.n_bs_elements)
 
-                ray_amp = (cluster_amp * self.sub_ray_phases[c, r]
-                           * doppler_phase / np.sqrt(nr))
-                h += ray_amp * np.outer(a_ue, a_bs.conj())
+        # Doppler phase per sub-ray: f_D = (v · k_nm) / lambda
+        if p.ue_speed_mps != 0.0 and time_s != 0.0:
+            ray_angle_world = aoa_world_c[:, None] + self.sub_ray_aoa_offsets   # (n_cl, nr)
+            v_x = p.ue_speed_mps * np.cos(ue_yaw)
+            v_y = p.ue_speed_mps * np.sin(ue_yaw)
+            f_d = (v_x * np.cos(ray_angle_world) + v_y * np.sin(ray_angle_world)) / lam
+            doppler_phase = np.exp(1j * 2.0 * np.pi * f_d * time_s).reshape(-1)
+        else:
+            doppler_phase = np.ones(n_cl * nr, dtype=np.complex128)
+
+        # Ray amplitude per sub-ray (n_cl*nr,)
+        ray_amp = (cluster_amp[:, None] * self.sub_ray_phases * doppler_phase.reshape(n_cl, nr)
+                   / np.sqrt(nr)).reshape(-1)
+
+        # Sum of outer products: H_nlos[i, j] = sum_r ray_amp[r] * a_ue[r, i] * conj(a_bs[r, j])
+        h += np.einsum("ri,rj,r->ij", a_ue_all, a_bs_all.conj(), ray_amp)
         return h
 
     def los_aoa_world(self, ue_xy: NDArray[np.float64]) -> float:
