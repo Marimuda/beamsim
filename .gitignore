@@ -8,5 +8,7 @@ dist/
 venv/
 results/*.npz
 results/*.pdf
+results/*.log
+results/*.txt
 !results/.gitkeep
 .DS_Store
