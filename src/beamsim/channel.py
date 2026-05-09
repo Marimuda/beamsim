@@ -56,13 +56,11 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass, field
-from typing import Optional
 
 import numpy as np
 from numpy.typing import NDArray
 
 from beamsim.codebook import steering_vector
-
 
 SPEED_OF_LIGHT = 2.998e8
 
@@ -70,12 +68,31 @@ SPEED_OF_LIGHT = 2.998e8
 # TR 38.901 Table 7.5-3: kept for import compatibility (tests may still import
 # this symbol).  The value is no longer used internally for sub-ray generation.
 # ---------------------------------------------------------------------------
-_TR38901_RAY_OFFSETS_DEG: NDArray[np.float64] = np.array([
-     0.0447,  0.1413,  0.2492,  0.3715,  0.5129,
-     0.6797,  0.8844,  1.1481,  1.5195,  2.1551,
-    -0.0447, -0.1413, -0.2492, -0.3715, -0.5129,
-    -0.6797, -0.8844, -1.1481, -1.5195, -2.1551,
-], dtype=np.float64)  # shape (20,) — kept for backward import only
+_TR38901_RAY_OFFSETS_DEG: NDArray[np.float64] = np.array(
+    [
+        0.0447,
+        0.1413,
+        0.2492,
+        0.3715,
+        0.5129,
+        0.6797,
+        0.8844,
+        1.1481,
+        1.5195,
+        2.1551,
+        -0.0447,
+        -0.1413,
+        -0.2492,
+        -0.3715,
+        -0.5129,
+        -0.6797,
+        -0.8844,
+        -1.1481,
+        -1.5195,
+        -2.1551,
+    ],
+    dtype=np.float64,
+)  # shape (20,) — kept for backward import only
 
 
 # ---------------------------------------------------------------------------
@@ -84,17 +101,21 @@ _TR38901_RAY_OFFSETS_DEG: NDArray[np.float64] = np.array([
 # ---------------------------------------------------------------------------
 _LSP_PARAMS: dict = {
     ("umi", True): {
-        "ds_mu": -7.19, "ds_sigma": 0.40,       # TR 38.901 Table 7.5-6 UMi LOS DS
-        "asa_mu": 1.81,  "asa_sigma": 0.20,      # UMi LOS ASA
-        "asd_mu": 1.20,  "asd_sigma": 0.41,      # UMi LOS ASD
-        "k_mu_db": 9.0,  "k_sigma_db": 5.0,      # UMi LOS K-factor (dB)
-        "sf_sigma_db": 4.0,                       # UMi LOS shadow fading std
-        "r_tau": 3.0,                             # delay-scaling ratio
-        "xi_db": 3.0,                             # per-cluster shadow std (unused in geo model)
+        "ds_mu": -7.19,
+        "ds_sigma": 0.40,  # TR 38.901 Table 7.5-6 UMi LOS DS
+        "asa_mu": 1.81,
+        "asa_sigma": 0.20,  # UMi LOS ASA
+        "asd_mu": 1.20,
+        "asd_sigma": 0.41,  # UMi LOS ASD
+        "k_mu_db": 9.0,
+        "k_sigma_db": 5.0,  # UMi LOS K-factor (dB)
+        "sf_sigma_db": 4.0,  # UMi LOS shadow fading std
+        "r_tau": 3.0,  # delay-scaling ratio
+        "xi_db": 3.0,  # per-cluster shadow std (unused in geo model)
         "n_clusters": 12,
         "n_rays": 20,
-        "cluster_asa_deg": 17.0,                  # intra-cluster ASA, Table 3.2
-        "cluster_asd_deg": 3.0,                   # intra-cluster ASD, Table 3.2
+        "cluster_asa_deg": 17.0,  # intra-cluster ASA, Table 3.2
+        "cluster_asd_deg": 3.0,  # intra-cluster ASD, Table 3.2
     },
 }
 
@@ -106,18 +127,19 @@ class ChannelParams:
     Defaults correspond to the UMi LOS table (Table 3.1 of the predecessor
     report, equivalently TR 38.901 Table 7.5-6 UMi LOS row).
     """
+
     fc_hz: float = 28e9
     bandwidth_hz: float = 100e6
     h_bs: float = 10.0
     h_ut: float = 1.5
     n_clusters: int = 12
     n_rays_per_cluster: int = 20
-    cluster_asa_deg: float = 17.0     # Table 3.2 UMi LOS
+    cluster_asa_deg: float = 17.0  # Table 3.2 UMi LOS
     cluster_asd_deg: float = 3.0
     k_factor_mean_db: float = 9.0
     k_factor_std_db: float = 5.0
     cluster_shadow_std_db: float = 3.0
-    los_probability: float = 1.0       # set <1.0 for stochastic LOS state
+    los_probability: float = 1.0  # set <1.0 for stochastic LOS state
     blockage_rate_per_sec: float = 0.0  # unused; kept for API compat
     scenario: str = "umi"
     ue_speed_mps: float = 0.0
@@ -125,11 +147,15 @@ class ChannelParams:
     scatterer_radius_m: float = 200.0
     # Self-blocker width: 120 deg (portrait) or 160 deg (landscape).
     self_blocker_width_deg: float = 120.0
+    # When True, skip the NLOS cluster sum (LOS component only).
+    # Used for the "without reflectors" Fig 6.9 variant.
+    disable_clusters: bool = False
 
 
 # ---------------------------------------------------------------------------
 # Path loss (unchanged — matches predecessor report Sec 3.2.1)
 # ---------------------------------------------------------------------------
+
 
 def umi_path_loss_db(d_2d_m: float, fc_hz: float, h_bs: float, h_ut: float, los: bool) -> float:
     """3GPP TR 38.901 §7.4.1, UMi-Street-Canyon path loss in dB.
@@ -139,13 +165,17 @@ def umi_path_loss_db(d_2d_m: float, fc_hz: float, h_bs: float, h_ut: float, los:
     fc_ghz = fc_hz / 1e9
     h_e = 1.0
     d_bp = 4 * (h_bs - h_e) * (h_ut - h_e) * fc_hz / SPEED_OF_LIGHT
-    d_3d = np.sqrt(d_2d_m ** 2 + (h_bs - h_ut) ** 2)
+    d_3d = np.sqrt(d_2d_m**2 + (h_bs - h_ut) ** 2)
     pl_los_close = 32.4 + 21 * np.log10(d_3d) + 20 * np.log10(fc_ghz)
     if d_2d_m <= d_bp:
         pl_los = pl_los_close
     else:
-        pl_los = (32.4 + 40 * np.log10(d_3d) + 20 * np.log10(fc_ghz)
-                  - 9.5 * np.log10(d_bp ** 2 + (h_bs - h_ut) ** 2))
+        pl_los = (
+            32.4
+            + 40 * np.log10(d_3d)
+            + 20 * np.log10(fc_ghz)
+            - 9.5 * np.log10(d_bp**2 + (h_bs - h_ut) ** 2)
+        )
     if los:
         return pl_los
     pl_nlos = 35.3 * np.log10(d_3d) + 22.4 + 21.3 * np.log10(fc_ghz) - 0.3 * (h_ut - 1.5)
@@ -157,12 +187,16 @@ def uma_path_loss_db(d_2d_m: float, fc_hz: float, h_bs: float, h_ut: float, los:
     fc_ghz = fc_hz / 1e9
     h_e = 1.0
     d_bp = 4 * (h_bs - h_e) * (h_ut - h_e) * fc_hz / SPEED_OF_LIGHT
-    d_3d = np.sqrt(d_2d_m ** 2 + (h_bs - h_ut) ** 2)
+    d_3d = np.sqrt(d_2d_m**2 + (h_bs - h_ut) ** 2)
     if d_2d_m <= d_bp:
         pl_los = 28.0 + 22 * np.log10(d_3d) + 20 * np.log10(fc_ghz)
     else:
-        pl_los = (28.0 + 40 * np.log10(d_3d) + 20 * np.log10(fc_ghz)
-                  - 9.0 * np.log10(d_bp ** 2 + (h_bs - h_ut) ** 2))
+        pl_los = (
+            28.0
+            + 40 * np.log10(d_3d)
+            + 20 * np.log10(fc_ghz)
+            - 9.0 * np.log10(d_bp**2 + (h_bs - h_ut) ** 2)
+        )
     if los:
         return pl_los
     pl_nlos = 13.54 + 39.08 * np.log10(d_3d) + 20 * np.log10(fc_ghz) - 0.6 * (h_ut - 1.5)
@@ -172,6 +206,7 @@ def uma_path_loss_db(d_2d_m: float, fc_hz: float, h_bs: float, h_ut: float, los:
 # ---------------------------------------------------------------------------
 # LOS probability (unchanged — matches predecessor report Sec 3.2.1)
 # ---------------------------------------------------------------------------
+
 
 def umi_los_probability(d_2d_m: float) -> float:
     """TR 38.901 §7.4.2 UMi-Street-Canyon LOS probability.
@@ -189,9 +224,12 @@ def umi_los_probability(d_2d_m: float) -> float:
 _NO_K_FACTOR = object()  # sentinel: suppress K-factor draw (NLOS state)
 
 
-def _draw_lsps(rng: np.random.Generator, lsp: dict,
-               k_mu_db_override=None,
-               k_sigma_db_override=None) -> dict:
+def _draw_lsps(
+    rng: np.random.Generator,
+    lsp: dict,
+    k_mu_db_override: float | None = None,
+    k_sigma_db_override: float | None = None,
+) -> dict:
     """Draw independent large-scale parameters for one UE drop.
 
     Returns dict with keys: ds_s, asa_deg, asd_deg, k_db, k_lin, sf_db.
@@ -209,26 +247,33 @@ def _draw_lsps(rng: np.random.Generator, lsp: dict,
         k_lin = 0.0
     else:
         k_mu = k_mu_db_override if k_mu_db_override is not None else lsp["k_mu_db"]
-        k_sigma = (k_sigma_db_override if k_sigma_db_override is not None
-                   else lsp["k_sigma_db"])
+        k_sigma = k_sigma_db_override if k_sigma_db_override is not None else lsp["k_sigma_db"]
         if k_mu is not None:
-            k_db = float(np.clip(
-                rng.normal(k_mu, k_sigma if k_sigma is not None else 0.0),
-                -3.0, 20.0))
+            k_db = float(
+                np.clip(rng.normal(k_mu, k_sigma if k_sigma is not None else 0.0), -3.0, 20.0)
+            )
             k_lin = float(10 ** (k_db / 10.0))
         else:
             k_db = -np.inf
             k_lin = 0.0
-    return {"ds_s": ds_s, "asa_deg": asa_deg, "asd_deg": asd_deg,
-            "k_db": k_db, "k_lin": k_lin, "sf_db": sf_db}
+    return {
+        "ds_s": ds_s,
+        "asa_deg": asa_deg,
+        "asd_deg": asd_deg,
+        "k_db": k_db,
+        "k_lin": k_lin,
+        "sf_db": sf_db,
+    }
 
 
 # ---------------------------------------------------------------------------
 # Cluster delays (unchanged procedure)
 # ---------------------------------------------------------------------------
 
-def _draw_cluster_delays(rng: np.random.Generator, n: int,
-                          r_tau: float, ds_s: float) -> NDArray[np.float64]:
+
+def _draw_cluster_delays(
+    rng: np.random.Generator, n: int, r_tau: float, ds_s: float
+) -> NDArray[np.float64]:
     """TR 38.901 §7.5 Step 5: draw and sort cluster delays.
 
     tau'_n ~ -r_tau * DS * ln(X_n),  X_n ~ Uniform(0,1).
@@ -242,6 +287,7 @@ def _draw_cluster_delays(rng: np.random.Generator, n: int,
 # ---------------------------------------------------------------------------
 # Geometric cluster power (predecessor Sec 3.2.2)
 # ---------------------------------------------------------------------------
+
 
 def _geometric_cluster_powers(
     bs_xy: NDArray[np.float64],
@@ -268,10 +314,9 @@ def _geometric_cluster_powers(
     extra = d_bs_s + d_s_ue - d_bs_ue
 
     pl_ref = umi_path_loss_db(max(d_bs_ue, 1.0), fc_hz, h_bs, h_ut, los=False)
-    pl_sc = np.array([
-        umi_path_loss_db(max(d_bs_ue + ex, 1.0), fc_hz, h_bs, h_ut, los=False)
-        for ex in extra
-    ])
+    pl_sc = np.array(
+        [umi_path_loss_db(max(d_bs_ue + ex, 1.0), fc_hz, h_bs, h_ut, los=False) for ex in extra]
+    )
     delta_pl_db = pl_sc - pl_ref  # additional loss per cluster (>= 0)
 
     amp = 10 ** (-delta_pl_db / 20.0)
@@ -288,6 +333,7 @@ def _geometric_cluster_powers(
 # ---------------------------------------------------------------------------
 # Laplacian sub-ray angle offsets (predecessor Eq 3.14, Sec 3.2.3)
 # ---------------------------------------------------------------------------
+
 
 def _laplacian_subray_offsets(
     rng: np.random.Generator,
@@ -308,8 +354,7 @@ def _laplacian_subray_offsets(
     scale = spread_rad / math.sqrt(2.0)
     offsets = np.zeros((n_clusters, n_rays))
     if n_rays > 1:
-        offsets[:, 1:] = rng.laplace(loc=0.0, scale=scale,
-                                      size=(n_clusters, n_rays - 1))
+        offsets[:, 1:] = rng.laplace(loc=0.0, scale=scale, size=(n_clusters, n_rays - 1))
     return offsets
 
 
@@ -317,8 +362,10 @@ def _laplacian_subray_offsets(
 # Blockage Model A (predecessor Sec 3.2.4, Eqs 3.15–3.18)
 # ---------------------------------------------------------------------------
 
-def _ked_attenuation_db(phi_rel: NDArray[np.float64],
-                         phi_k: float, x_k: float) -> NDArray[np.float64]:
+
+def _ked_attenuation_db(
+    phi_rel: NDArray[np.float64], phi_k: float, x_k: float
+) -> NDArray[np.float64]:
     """KED-based attenuation (dB) for a single non-self blocker (Eq 3.16–3.17).
 
     phi_rel: array of relative AoA angles (rad) in UE body frame.
@@ -336,10 +383,8 @@ def _ked_attenuation_db(phi_rel: NDArray[np.float64],
     result = np.zeros_like(phi_rel)
 
     # Determine sign pattern per angular region (Eq 3.16 sign table)
-    sign_plus = np.where(delta > half, -1.0,
-                np.where(delta >= -half, 1.0, 1.0))
-    sign_minus = np.where(delta > half, 1.0,
-                 np.where(delta >= -half, 1.0, -1.0))
+    sign_plus = np.where(delta > half, -1.0, np.where(delta >= -half, 1.0, 1.0))
+    sign_minus = np.where(delta > half, 1.0, np.where(delta >= -half, 1.0, -1.0))
 
     # Eq 3.17: beta_k(phi) = (pi/2) * sqrt((pi/lambda_eff) - 1) / cos(delta - half)
     # The TR 38.901 formula uses lambda=0.4 m (≈750 MHz) as a shape parameter.
@@ -377,13 +422,15 @@ class BlockageState:
     Initialised once per trial; updated per channel_matrix() call via
     update(ue_xy, time_s).  Implements Eq 3.18 autocorrelation model.
     """
+
     n_non_self: int
-    phi_k: NDArray[np.float64]      # non-self blocker centre angles (rad), body frame
-    x_k: NDArray[np.float64]        # non-self blocker widths (rad)
-    self_width_rad: float           # self-blocker width (rad)
+    phi_k: NDArray[np.float64]  # non-self blocker centre angles (rad), body frame
+    x_k: NDArray[np.float64]  # non-self blocker widths (rad)
+    self_width_rad: float  # self-blocker width (rad)
     self_centre_rad: float = math.pi  # centre at back of UE (180 deg)
-    _prev_ue_xy: Optional[NDArray[np.float64]] = field(default=None)
-    _dcorr_m: float = 10.0          # correlation distance (m)
+    _prev_ue_xy: NDArray[np.float64] | None = field(default=None)
+    _dcorr_m: float = 10.0  # correlation distance (m)
+    _rng: np.random.Generator | None = field(default=None)  # trial RNG for Eq 3.18
 
     def update_blocker_angles(self, ue_xy: NDArray[np.float64]) -> None:
         """Drift non-self blocker angles per Eq 3.18 based on UE displacement."""
@@ -396,8 +443,8 @@ class BlockageState:
             return
         # Autocorrelation: R(dx) = exp(-dx/dcorr). Drift sigma per unit distance.
         sigma = math.sqrt(2.0 * dx / self._dcorr_m)
-        # Generate correlated Gaussian drift for each blocker
-        rng = np.random.default_rng(int(abs(hash(ue_xy.tobytes())) % (2**31)))
+        # Use trial RNG so drift is stochastic across calls (not position-seeded).
+        rng = self._rng if self._rng is not None else np.random.default_rng()
         self.phi_k += rng.normal(0.0, sigma, size=self.n_non_self)
         self.phi_k = (self.phi_k + np.pi) % (2 * np.pi) - np.pi
 
@@ -420,8 +467,7 @@ class BlockageState:
         return total
 
 
-def _init_blockage_state(rng: np.random.Generator,
-                          self_width_deg: float) -> BlockageState:
+def _init_blockage_state(rng: np.random.Generator, self_width_deg: float) -> BlockageState:
     """Initialise blockage state: 1 self-blocker + 4 non-self blockers."""
     n = 4
     phi_k = rng.uniform(-np.pi, np.pi, size=n)
@@ -431,12 +477,14 @@ def _init_blockage_state(rng: np.random.Generator,
         phi_k=phi_k,
         x_k=x_k,
         self_width_rad=math.radians(self_width_deg),
+        _rng=rng,
     )
 
 
 # ---------------------------------------------------------------------------
 # Main channel realisation
 # ---------------------------------------------------------------------------
+
 
 @dataclass
 class ChannelRealisation:
@@ -449,6 +497,7 @@ class ChannelRealisation:
       - No random initial phases.
       - Blockage Model A (Eqs 3.15–3.18), evaluated per UE pose.
     """
+
     params: ChannelParams
     bs_xy: NDArray[np.float64]
     bs_yaw: float
@@ -464,7 +513,7 @@ class ChannelRealisation:
     k_lin: float = 1.0
     los_blocked: bool = False
     lsp: dict = field(default_factory=dict)
-    _blockage: Optional[BlockageState] = field(default=None)
+    _blockage: BlockageState | None = field(default=None)
 
     def __post_init__(self) -> None:
         rng = self.rng
@@ -483,8 +532,9 @@ class ChannelRealisation:
         # ------------------------------------------------------------------
         lsp_table = _LSP_PARAMS[("umi", True)]
         drawn = _draw_lsps(
-            rng, lsp_table,
-            k_mu_db_override=(p.k_factor_mean_db if self.is_los else _NO_K_FACTOR),
+            rng,
+            lsp_table,
+            k_mu_db_override=(p.k_factor_mean_db if self.is_los else _NO_K_FACTOR),  # type: ignore[arg-type]  # _NO_K_FACTOR is an object() sentinel for NLOS suppression
             k_sigma_db_override=(p.k_factor_std_db if self.is_los else None),
         )
         self.lsp = drawn
@@ -522,19 +572,17 @@ class ChannelRealisation:
         # Step 8 – Sub-ray offsets: Laplacian (Eq 3.14, Sec 3.2.3)
         # First sub-ray keeps cluster mean (offset=0); L-1 others are draws.
         # ------------------------------------------------------------------
-        self.sub_ray_aoa_offsets = _laplacian_subray_offsets(
-            rng, n, nr, cluster_asa_rad)
-        self.sub_ray_aod_offsets = _laplacian_subray_offsets(
-            rng, n, nr, cluster_asd_rad)
+        self.sub_ray_aoa_offsets = _laplacian_subray_offsets(rng, n, nr, cluster_asa_rad)
+        self.sub_ray_aod_offsets = _laplacian_subray_offsets(rng, n, nr, cluster_asd_rad)
 
         # ------------------------------------------------------------------
         # Blockage state (Model A, Sec 3.2.4)
         # ------------------------------------------------------------------
         self._blockage = _init_blockage_state(rng, p.self_blocker_width_deg)
 
-    def _apply_blockage(self, ue_xy: NDArray[np.float64],
-                         ue_yaw: float,
-                         cluster_aoa_world: NDArray[np.float64]) -> NDArray[np.float64]:
+    def _apply_blockage(
+        self, ue_xy: NDArray[np.float64], ue_yaw: float, cluster_aoa_world: NDArray[np.float64]
+    ) -> NDArray[np.float64]:
         """Return per-cluster blockage attenuation (dB) for current UE pose.
 
         cluster_aoa_world: world-frame AoA for each cluster (rad), shape (n,).
@@ -552,17 +600,15 @@ class ChannelRealisation:
         aoa_body = _wrap_pi(cluster_aoa_world - ue_yaw)
 
         # LOS direction in body frame
-        los_aoa_world = float(np.arctan2(self.bs_xy[1] - ue_xy[1],
-                                          self.bs_xy[0] - ue_xy[0]))
+        los_aoa_world = float(np.arctan2(self.bs_xy[1] - ue_xy[1], self.bs_xy[0] - ue_xy[0]))
         los_body = float(_wrap_pi(los_aoa_world - ue_yaw))
 
         all_aoa = np.append(aoa_body, los_body)
         return blk.attenuation_db(all_aoa)
 
-    def channel_matrix(self,
-                        ue_xy: NDArray[np.float64],
-                        ue_yaw: float,
-                        time_s: float = 0.0) -> NDArray[np.complex128]:
+    def channel_matrix(
+        self, ue_xy: NDArray[np.float64], ue_yaw: float, time_s: float = 0.0
+    ) -> NDArray[np.complex128]:
         """(n_ue_elements, n_bs_elements) downlink channel matrix at UE pose.
 
         Convention: y = w^H H f x, H in C^{N_UE x N_BS}.
@@ -580,8 +626,14 @@ class ChannelRealisation:
 
         # Recompute geometric cluster powers for this UE position
         cluster_powers = _geometric_cluster_powers(
-            self.bs_xy, ue_xy, self.scatterer_xy,
-            p.fc_hz, p.h_bs, p.h_ut, self.k_lin, self.is_los,
+            self.bs_xy,
+            ue_xy,
+            self.scatterer_xy,
+            p.fc_hz,
+            p.h_bs,
+            p.h_ut,
+            self.k_lin,
+            self.is_los,
         )
         self.cluster_powers = cluster_powers
 
@@ -602,17 +654,14 @@ class ChannelRealisation:
         # LOS direct path
         # ------------------------------------------------------------------
         if self.is_los:
-            aoa_world_los = float(np.arctan2(self.bs_xy[1] - ue_xy[1],
-                                              self.bs_xy[0] - ue_xy[0]))
-            aod_world_los = float(np.arctan2(ue_xy[1] - self.bs_xy[1],
-                                              ue_xy[0] - self.bs_xy[0]))
-            aoa_rel = float(_wrap_pi(aoa_world_los - ue_yaw))
-            aod_rel = float(_wrap_pi(aod_world_los - self.bs_yaw))
-            a_ue = steering_vector(self.n_ue_elements, aoa_rel)
-            a_bs = steering_vector(self.n_bs_elements, aod_rel)
+            aoa_world_los = float(np.arctan2(self.bs_xy[1] - ue_xy[1], self.bs_xy[0] - ue_xy[0]))
+            aod_world_los = float(np.arctan2(ue_xy[1] - self.bs_xy[1], ue_xy[0] - self.bs_xy[0]))
+            aoa_rel_los = float(_wrap_pi(aoa_world_los - ue_yaw))
+            aod_rel_los = float(_wrap_pi(aod_world_los - self.bs_yaw))
+            a_ue = steering_vector(self.n_ue_elements, aoa_rel_los)
+            a_bs = steering_vector(self.n_bs_elements, aod_rel_los)
             los_amp = pl_lin * np.sqrt(self.k_lin / (1.0 + self.k_lin)) * blk_los_amp
-            los_doppler = _los_doppler_phase(ue_xy, self.bs_xy, p.ue_speed_mps,
-                                             ue_yaw, lam, time_s)
+            los_doppler = _los_doppler_phase(ue_xy, self.bs_xy, p.ue_speed_mps, ue_yaw, lam, time_s)
             h += los_amp * los_doppler * np.outer(a_ue, a_bs.conj())
 
         # ------------------------------------------------------------------
@@ -627,8 +676,12 @@ class ChannelRealisation:
         cluster_amp = nlos_total_amp * np.sqrt(cluster_powers) * blk_cluster_amp  # (n_cl,)
 
         # Sub-ray relative angles (n_cl, nr)
-        aoa_rel = _wrap_pi(aoa_world_c[:, None] + self.sub_ray_aoa_offsets - ue_yaw)
-        aod_rel = _wrap_pi(aod_world_c[:, None] + self.sub_ray_aod_offsets - self.bs_yaw)
+        aoa_rel: NDArray[np.float64] = _wrap_pi(
+            aoa_world_c[:, None] + self.sub_ray_aoa_offsets - ue_yaw
+        )  # type: ignore[assignment]  # _wrap_pi returns Union; array at runtime
+        aod_rel: NDArray[np.float64] = _wrap_pi(
+            aod_world_c[:, None] + self.sub_ray_aod_offsets - self.bs_yaw
+        )  # type: ignore[assignment]  # same
 
         # Steering vectors over all sub-rays
         n_ue_idx = np.arange(self.n_ue_elements)
@@ -651,10 +704,10 @@ class ChannelRealisation:
             doppler_phase = np.ones(n_cl * nr, dtype=np.complex128)
 
         # Ray amplitude per sub-ray (n_cl*nr,): no random initial phase (Sec 3.2)
-        ray_amp = (cluster_amp[:, None] * doppler_phase.reshape(n_cl, nr)
-                   / np.sqrt(nr)).reshape(-1)
+        ray_amp = (cluster_amp[:, None] * doppler_phase.reshape(n_cl, nr) / np.sqrt(nr)).reshape(-1)
 
-        h += np.einsum("ri,rj,r->ij", a_ue_all, a_bs_all.conj(), ray_amp)
+        if not p.disable_clusters:
+            h += np.einsum("ri,rj,r->ij", a_ue_all, a_bs_all.conj(), ray_amp)
         return h
 
     def los_aoa_world(self, ue_xy: NDArray[np.float64]) -> float:
@@ -668,9 +721,15 @@ class ChannelRealisation:
 # Doppler helpers
 # ---------------------------------------------------------------------------
 
-def _los_doppler_phase(ue_xy: NDArray[np.float64], bs_xy: NDArray[np.float64],
-                        speed_mps: float, ue_yaw: float,
-                        lam: float, time_s: float) -> complex:
+
+def _los_doppler_phase(
+    ue_xy: NDArray[np.float64],
+    bs_xy: NDArray[np.float64],
+    speed_mps: float,
+    ue_yaw: float,
+    lam: float,
+    time_s: float,
+) -> complex:
     """Doppler phase for LOS ray; v aligned with ue_yaw heading."""
     if speed_mps == 0.0 or time_s == 0.0:
         return 1.0 + 0j
@@ -684,8 +743,9 @@ def _los_doppler_phase(ue_xy: NDArray[np.float64], bs_xy: NDArray[np.float64],
     return complex(np.exp(1j * 2 * np.pi * f_d * time_s))
 
 
-def _ray_doppler_phase(ray_angle_world: float, speed_mps: float,
-                        ue_yaw: float, lam: float, time_s: float) -> complex:
+def _ray_doppler_phase(
+    ray_angle_world: float, speed_mps: float, ue_yaw: float, lam: float, time_s: float
+) -> complex:
     """Doppler phase for a sub-ray arriving from world angle ray_angle_world."""
     if speed_mps == 0.0 or time_s == 0.0:
         return 1.0 + 0j
@@ -699,7 +759,8 @@ def _ray_doppler_phase(ray_angle_world: float, speed_mps: float,
 # Utility
 # ---------------------------------------------------------------------------
 
-def _wrap_pi(a: float) -> float:
+
+def _wrap_pi(a: float | NDArray[np.float64]) -> float | NDArray[np.float64]:
     return (a + np.pi) % (2 * np.pi) - np.pi
 
 
@@ -707,17 +768,21 @@ def _wrap_pi(a: float) -> float:
 # Free-space single-LOS channel (unchanged API)
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class FreeSpaceLosChannel:
     """Single-LOS-component channel for the noiseless rotation experiment."""
+
     bs_xy: NDArray[np.float64]
     bs_yaw: float
     n_bs_elements: int
     n_ue_elements: int
 
-    def channel_matrix(self, ue_xy, ue_yaw, time_s: float = 0.0) -> NDArray[np.complex128]:
+    def channel_matrix(
+        self, ue_xy: NDArray[np.float64], ue_yaw: float, time_s: float = 0.0
+    ) -> NDArray[np.complex128]:
         aoa_world = np.arctan2(self.bs_xy[1] - ue_xy[1], self.bs_xy[0] - ue_xy[0])
         aod_world = np.arctan2(ue_xy[1] - self.bs_xy[1], ue_xy[0] - self.bs_xy[0])
-        a_ue = steering_vector(self.n_ue_elements, _wrap_pi(aoa_world - ue_yaw))
-        a_bs = steering_vector(self.n_bs_elements, _wrap_pi(aod_world - self.bs_yaw))
+        a_ue = steering_vector(self.n_ue_elements, float(_wrap_pi(aoa_world - ue_yaw)))
+        a_bs = steering_vector(self.n_bs_elements, float(_wrap_pi(aod_world - self.bs_yaw)))
         return np.outer(a_ue, a_bs.conj())

@@ -31,21 +31,22 @@ import argparse
 from functools import partial
 from pathlib import Path
 
-import numpy as np
 import matplotlib.pyplot as plt
+import numpy as np
 
-from beamsim.channel import ChannelParams, ChannelRealisation, umi_path_loss_db
+from beamsim.channel import ChannelParams, ChannelRealisation
 from beamsim.geometry import straight_line_track
+from beamsim.link_budget import tx_amp_for_snr_db
 from beamsim.metrics import coverage_rate
 from beamsim.plotting import (
     ALGORITHM_LABELS,
     ALGORITHM_PALETTE,
+    bootstrap_ci,
     fig_single_column,
     save_figure,
     set_publication_style,
 )
 from beamsim.runner import Experiment, run_experiment, save_experiment
-
 
 # Predecessor Fig 6.4 caption: "coverage rate as defined in subsection 5.3.4,
 # with SNR threshold -9.53 dB" (minimum SINR at MCS-1, Equation 5.21).
@@ -58,34 +59,31 @@ NOISE_AMP = 1e-3
 # Case A geometry: BS at origin, UE path at y = 3/4 * IBS = 150 m.
 _BS_XY = np.array([0.0, 0.0])
 _UE_PATH_Y = 150.0
-_UE_PATH_HALF_LEN = 100.0   # half of IBS = 100 m; UE traverses ±100 m along x
+_UE_PATH_HALF_LEN = 100.0  # half of IBS = 100 m; UE traverses ±100 m along x
 
 
 def _track_factory(n_steps: int, dt: float, rng: np.random.Generator):
     # UE starts at a random position along the Case A path (+x direction).
     start_x = float(rng.uniform(-_UE_PATH_HALF_LEN, _UE_PATH_HALF_LEN))
-    return straight_line_track(start_xy=(start_x, _UE_PATH_Y),
-                                heading=0.0,       # +x direction
-                                speed_mps=10.0,    # 10 m/s per Fig 6.4 caption
-                                n_steps=n_steps,
-                                dt=dt)
+    return straight_line_track(
+        start_xy=(start_x, _UE_PATH_Y),
+        heading=0.0,  # +x direction
+        speed_mps=10.0,  # 10 m/s per Fig 6.4 caption
+        n_steps=n_steps,
+        dt=dt,
+    )
 
 
 def _channel_factory(rng: np.random.Generator, bs_index: int):
     params = ChannelParams(ue_speed_mps=10.0)
-    return ChannelRealisation(params=params,
-                               bs_xy=_BS_XY,
-                               bs_yaw=0.0,
-                               n_bs_elements=16,
-                               n_ue_elements=4,
-                               rng=rng)
+    return ChannelRealisation(
+        params=params, bs_xy=_BS_XY, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4, rng=rng
+    )
 
 
-def _tx_amp_for(target_db: float) -> float:
-    pl_db = umi_path_loss_db(DISTANCE_M, 28e9, 10.0, 1.5, los=True)
-    pl_lin = 10 ** (-pl_db / 20.0)
-    target_lin = 10 ** (target_db / 10.0)
-    return float(NOISE_AMP * np.sqrt(target_lin) / pl_lin)
+def _tx_amp_for(target_db: float, n_ue: int = 4, n_bs: int = 16) -> float:
+    """Tx amplitude such that per-element SNR = target_db at the reference distance."""
+    return tx_amp_for_snr_db(target_db, DISTANCE_M, 28e9, 10.0, 1.5, NOISE_AMP, n_ue, n_bs)
 
 
 def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray):
@@ -93,8 +91,9 @@ def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray
     dt = 1e-3
     algorithms = ["exhaustive", "nns", "tabu", "angular_prediction", "ci", "mcmd"]
 
-    cr_per_snr: dict[str, np.ndarray] = {a: np.zeros((len(snr_db_values), n_trials))
-                                           for a in algorithms}
+    cr_per_snr: dict[str, np.ndarray] = {
+        a: np.zeros((len(snr_db_values), n_trials)) for a in algorithms
+    }
 
     for i, snr_db in enumerate(snr_db_values):
         tx_amp = _tx_amp_for(float(snr_db))
@@ -116,7 +115,7 @@ def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray
         save_experiment(result, output_dir / f"snr_{snr_db:+.1f}.npz")
         for a in algorithms:
             cr_per_snr[a][i] = coverage_rate(result["snr_db"][a], GAMMA_TH_DB)
-        print(f"[snr_sweep] {i+1}/{len(snr_db_values)} : SNR={snr_db:+.1f} dB done")
+        print(f"[snr_sweep] {i + 1}/{len(snr_db_values)} : SNR={snr_db:+.1f} dB done")
 
     # Plot
     set_publication_style()
@@ -127,12 +126,7 @@ def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray
     for a in algorithms:
         traces = cr_per_snr[a]
         mean_curve = traces.mean(axis=1)
-        boot_means = np.empty((n_boot, traces.shape[0]))
-        for b in range(n_boot):
-            idx = rng.integers(0, traces.shape[1], size=traces.shape[1])
-            boot_means[b] = traces[:, idx].mean(axis=1)
-        lo = np.percentile(boot_means, 2.5, axis=0)
-        hi = np.percentile(boot_means, 97.5, axis=0)
+        lo, hi = bootstrap_ci(traces.T, n_boot=n_boot, ci_alpha=0.05, rng=rng)
         color = ALGORITHM_PALETTE[a]
         ax.plot(snr_db_values, mean_curve, color=color, label=ALGORITHM_LABELS[a])
         ax.fill_between(snr_db_values, lo, hi, color=color, alpha=0.20, linewidth=0)
@@ -141,21 +135,24 @@ def run(n_trials: int, n_steps: int, output_dir: Path, snr_db_values: np.ndarray
     ax.set_ylabel(rf"Coverage rate ($\gamma_{{\mathrm{{th}}}}={GAMMA_TH_DB:.2f}$ dB)")
     ax.set_title(f"Case A: UMi, 10 m/s, n_trials={n_trials}")
     ax.legend(fontsize=7, ncol=2)
+    ax.set_yscale("log")
+    ax.set_ylim(1e-5, 1.0)
     ax.grid(True, which="both", linewidth=0.3, alpha=0.4)
-    ax.set_ylim(0, 1)
 
     out_pdf = output_dir / "SNR_sweep_Coverage_Rate_10_mps_umi_with_ci.pdf"
     save_figure(fig, out_pdf)
     plt.close(fig)
-    np.savez_compressed(output_dir / "snr_aggregate.npz",
-                        snr_db=snr_db_values, gamma_th_db=GAMMA_TH_DB,
-                        **{f"coverage_rate/{a}": cr_per_snr[a] for a in algorithms})
+    np.savez_compressed(
+        output_dir / "snr_aggregate.npz",
+        snr_db=snr_db_values,
+        gamma_th_db=GAMMA_TH_DB,
+        **{f"coverage_rate/{a}": cr_per_snr[a] for a in algorithms},
+    )
     return out_pdf
 
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Case A SNR sweep (predecessor Fig 6.4).")
+    parser = argparse.ArgumentParser(description="Case A SNR sweep (predecessor Fig 6.4).")
     parser.add_argument("--n-trials", type=int, default=30)
     # 1 second at 1 ms = 1 000 steps (predecessor default, Section 6).
     parser.add_argument("--n-steps", type=int, default=1_000)

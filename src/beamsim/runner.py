@@ -39,32 +39,36 @@ Storage
 from __future__ import annotations
 
 import os
+from collections.abc import Callable
 from concurrent.futures import ProcessPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import numpy as np
 from numpy.typing import NDArray
 
 from beamsim.algorithms import ALL_ALGORITHMS
 from beamsim.bplm import BPLMState
-from beamsim.codebook import make_default_ue_codebook, make_default_bs_codebook
+from beamsim.codebook import make_default_bs_codebook, make_default_ue_codebook
 from beamsim.geometry import Track
-
 
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
 
+
 @dataclass
 class TrialResult:
     """Outputs of a single Monte Carlo trial for all algorithms."""
 
-    snr_db: dict[str, NDArray[np.float64]]         # algo -> (n_steps,)
-    obp_history: dict[str, NDArray[np.int_]]        # algo -> (n_steps, 2) [k, l]
+    snr_db: dict[str, NDArray[np.float64]]  # algo -> (n_steps,)
+    obp_history: dict[str, NDArray[np.int_]]  # algo -> (n_steps, 2) [k, l]
     selected_bs: dict[str, NDArray[np.int_]] | None  # algo -> (n_steps,); None if single-BS
     seed: int
+    snr_db_best: dict[str, NDArray[np.float64]] | None = (
+        None  # algo -> (n_steps,); None if single-BS
+    )
+    snr_oracle: NDArray[np.float64] | None = None  # (n_steps,) true oracle; None if single-BS
 
 
 @dataclass
@@ -75,10 +79,10 @@ class Experiment:
     n_steps: int
     dt: float
     n_trials: int
-    algorithms: list[str]                                       # keys in ALL_ALGORITHMS
-    bs_positions: list[tuple[float, float]]                     # 1 BS or N BS for handover
+    algorithms: list[str]  # keys in ALL_ALGORITHMS
+    bs_positions: list[tuple[float, float]]  # 1 BS or N BS for handover
     bs_yaws: list[float]
-    track_factory: Callable[[np.random.Generator], Track]       # per-trial
+    track_factory: Callable[[np.random.Generator], Track]  # per-trial
     channel_factory: Callable[[np.random.Generator, int], object]  # (rng, bs_index) -> channel
     noise_amplitude: float
     tx_amp: float
@@ -96,6 +100,7 @@ class Experiment:
 # Trial worker (must be a top-level function to be picklable)
 # ---------------------------------------------------------------------------
 
+
 def _run_trial(
     trial_index: int,
     experiment: Experiment,
@@ -108,15 +113,11 @@ def _run_trial(
     # Spawn three independent child streams: track, channels, and then one
     # per algo for noise.  Spawning before any draws keeps the streams
     # independent of algorithm count.
-    track_rng, channel_rng, *algo_noise_rngs = root_rng.spawn(
-        2 + len(experiment.algorithms)
-    )
+    track_rng, channel_rng, *algo_noise_rngs = root_rng.spawn(2 + len(experiment.algorithms))
 
     # --- Build shared channel(s) and track -----------------------------------
     n_bs = len(experiment.bs_positions)
-    channels = [
-        experiment.channel_factory(channel_rng, b) for b in range(n_bs)
-    ]
+    channels = [experiment.channel_factory(channel_rng, b) for b in range(n_bs)]
     track: Track = experiment.track_factory(track_rng)
 
     # --- Prepare per-algorithm state -----------------------------------------
@@ -142,11 +143,11 @@ def _run_trial(
         "ue_pose_at": lambda m: (track.positions[m], float(track.orientations[m])),
         "bs_xy": np.array(experiment.bs_positions[0]),
         "bs_yaw": experiment.bs_yaws[0],
+        "trial_seed": trial_seed,
     }
     if multi_bs:
         context["bs_list"] = [
-            {"bs_xy": np.array(experiment.bs_positions[b]),
-             "bs_yaw": experiment.bs_yaws[b]}
+            {"bs_xy": np.array(experiment.bs_positions[b]), "bs_yaw": experiment.bs_yaws[b]}
             for b in range(n_bs)
         ]
 
@@ -157,12 +158,28 @@ def _run_trial(
 
     # --- Output arrays -------------------------------------------------------
     snr_db = {a: np.zeros(experiment.n_steps) for a in experiment.algorithms}
-    obp_history = {a: np.zeros((experiment.n_steps, 2), dtype=np.int_)
-                   for a in experiment.algorithms}
+    obp_history = {
+        a: np.zeros((experiment.n_steps, 2), dtype=np.int_) for a in experiment.algorithms
+    }
     selected_bs_out: dict[str, NDArray[np.int_]] | None = (
         {a: np.zeros(experiment.n_steps, dtype=np.int_) for a in experiment.algorithms}
-        if multi_bs else None
+        if multi_bs
+        else None
     )
+    # Best-BS noiseless SNR per step (only for multi-BS experiments)
+    snr_db_best_out: dict[str, NDArray[np.float64]] | None = (
+        {a: np.zeros(experiment.n_steps) for a in experiment.algorithms} if multi_bs else None
+    )
+    # True oracle: max over all (BS, k, l) of noiseless post-beamforming SNR.
+    snr_oracle_out: NDArray[np.float64] | None = np.zeros(experiment.n_steps) if multi_bs else None
+
+    # Pre-build full codebook matrices for vectorised oracle computation.
+    # W: (K, n_ue_elements), F: (L, n_bs_elements)
+    if multi_bs:
+        _W = ue_cb.matrix.T.conj()  # type: ignore[attr-defined]  # Codebook factory returns object; .matrix exists at runtime
+        _F = bs_cb.matrix.T  # type: ignore[attr-defined]  # same
+        _sigma_sq = experiment.noise_amplitude**2
+        _tx_amp_sq = experiment.tx_amp**2
 
     # --- Main loop -----------------------------------------------------------
     for m in range(experiment.n_steps):
@@ -172,9 +189,22 @@ def _run_trial(
 
         # Compute channel matrix for each BS (shared across algos — CRN).
         H_per_bs = [
-            channels[b].channel_matrix(ue_xy, ue_yaw, time_s)
+            channels[b].channel_matrix(ue_xy, ue_yaw, time_s)  # type: ignore[attr-defined]  # channel factory returns object; .channel_matrix exists at runtime
             for b in range(n_bs)
         ]
+
+        context["true_H"] = H_per_bs[0]
+
+        # Oracle: max noiseless SNR over all (BS, k, l) — algo-independent.
+        if multi_bs and snr_oracle_out is not None:
+            # H_stack: (n_bs, Nue, Nbs)
+            H_stack = np.stack(H_per_bs, axis=0)
+            # gains[b, k, l] = |w_k^H @ H_b @ f_l|^2
+            # _W[k,i] = w_k.conj()[i], _F[l,j] = f_l[j]
+            # einsum: sum_{i,j} _W[k,i] * H[b,i,j] * _F[l,j] = w_k^H H_b f_l
+            gains = np.abs(np.einsum("ki,bij,lj->bkl", _W, H_stack, _F)) ** 2
+            oracle_lin = float(gains.max()) * _tx_amp_sq / _sigma_sq
+            snr_oracle_out[m] = 10.0 * np.log10(max(oracle_lin, 1e-10))
 
         for a_idx, algo_name in enumerate(experiment.algorithms):
             noise_rng = algo_noise_rngs[a_idx]
@@ -198,14 +228,17 @@ def _run_trial(
 
             # Compute output SNR for each BS using the OBP codewords
             bs_snr_lin = _obp_snr_linear(
-                k_obp, l_obp, H_per_bs, ue_cb, bs_cb,
-                experiment.tx_amp, experiment.noise_amplitude
+                k_obp, l_obp, H_per_bs, ue_cb, bs_cb, experiment.tx_amp, experiment.noise_amplitude
             )
 
             if multi_bs:
                 best_b = int(np.argmax(bs_snr_lin))
                 selected_bs_out[algo_name][m] = best_b  # type: ignore[index]
                 snr_lin = bs_snr_lin[best_b]
+                # Record oracle best-BS SNR (max over all BSs)
+                snr_db_best_out[algo_name][m] = 10.0 * np.log10(  # type: ignore[index]
+                    max(float(bs_snr_lin.max()), 1e-10)
+                )
             else:
                 snr_lin = bs_snr_lin[0]
 
@@ -216,6 +249,8 @@ def _run_trial(
         obp_history=obp_history,
         selected_bs=selected_bs_out,
         seed=trial_seed,
+        snr_db_best=snr_db_best_out,
+        snr_oracle=snr_oracle_out,
     )
 
 
@@ -223,10 +258,11 @@ def _run_trial(
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _make_bplm(ue_cb, bs_cb, noise_amplitude: float, tx_amp: float) -> BPLMState:
+
+def _make_bplm(ue_cb: object, bs_cb: object, noise_amplitude: float, tx_amp: float) -> BPLMState:
     state = BPLMState(
-        ue_codebook=ue_cb,
-        bs_codebook=bs_cb,
+        ue_codebook=ue_cb,  # type: ignore[arg-type]  # codebook factory returns object; Codebook at runtime
+        bs_codebook=bs_cb,  # type: ignore[arg-type]  # same
         noise_amplitude=noise_amplitude,
     )
     state.tx_amp = tx_amp
@@ -237,25 +273,26 @@ def _obp_snr_linear(
     k_obp: int,
     l_obp: int,
     H_per_bs: list[NDArray[np.complex128]],
-    ue_cb,
-    bs_cb,
+    ue_cb: object,
+    bs_cb: object,
     tx_amp: float,
     noise_amplitude: float,
 ) -> NDArray[np.float64]:
     """Noiseless OBP gain: |w_k^H H f_l|^2 * tx_amp^2 / sigma_n^2."""
-    w = ue_cb.codeword(k_obp)
-    f = bs_cb.codeword(l_obp)
-    sigma_sq = noise_amplitude ** 2
+    w = ue_cb.codeword(k_obp)  # type: ignore[attr-defined]  # Codebook factory returns object; .codeword exists at runtime
+    f = bs_cb.codeword(l_obp)  # type: ignore[attr-defined]  # same
+    sigma_sq = noise_amplitude**2
     snr_lin = np.empty(len(H_per_bs))
     for b, H in enumerate(H_per_bs):
         gain_sq = abs(w.conj() @ H @ f) ** 2
-        snr_lin[b] = gain_sq * tx_amp ** 2 / sigma_sq
+        snr_lin[b] = gain_sq * tx_amp**2 / sigma_sq
     return snr_lin
 
 
 # ---------------------------------------------------------------------------
 # Public orchestrator
 # ---------------------------------------------------------------------------
+
 
 def run_experiment(
     experiment: Experiment,
@@ -294,7 +331,14 @@ def run_experiment(
     multi_bs = len(experiment.bs_positions) > 1
     sel_bs_out: dict[str, NDArray[np.int_]] | None = (
         {a: np.zeros((n_trials, experiment.n_steps), dtype=np.int_) for a in algos}
-        if multi_bs else None
+        if multi_bs
+        else None
+    )
+    snr_db_best_agg: dict[str, NDArray[np.float64]] | None = (
+        {a: np.zeros((n_trials, experiment.n_steps)) for a in algos} if multi_bs else None
+    )
+    snr_oracle_agg: NDArray[np.float64] | None = (
+        np.zeros((n_trials, experiment.n_steps)) if multi_bs else None
     )
     seeds = np.zeros(n_trials, dtype=np.int64)
 
@@ -302,6 +346,7 @@ def run_experiment(
     try:
         if progress:
             from tqdm import tqdm
+
             pbar = tqdm(total=n_trials, desc=experiment.name, unit="trial")
         else:
             pbar = None
@@ -309,10 +354,7 @@ def run_experiment(
         pbar = None
 
     with ProcessPoolExecutor(max_workers=n_workers) as pool:
-        futures = {
-            pool.submit(_run_trial, t, experiment): t
-            for t in range(n_trials)
-        }
+        futures = {pool.submit(_run_trial, t, experiment): t for t in range(n_trials)}
         for fut in as_completed(futures):
             t = futures[fut]
             result: TrialResult = fut.result()
@@ -322,6 +364,10 @@ def run_experiment(
                 obp_out[a][t] = result.obp_history[a]
                 if sel_bs_out is not None and result.selected_bs is not None:
                     sel_bs_out[a][t] = result.selected_bs[a]
+                if snr_db_best_agg is not None and result.snr_db_best is not None:
+                    snr_db_best_agg[a][t] = result.snr_db_best[a]
+            if snr_oracle_agg is not None and result.snr_oracle is not None:
+                snr_oracle_agg[t] = result.snr_oracle
             if pbar is not None:
                 pbar.update(1)
 
@@ -337,6 +383,8 @@ def run_experiment(
         "snr_db": snr_db_out,
         "obp_history": obp_out,
         "selected_bs": sel_bs_out,
+        "snr_db_best": snr_db_best_agg,
+        "snr_oracle": snr_oracle_agg,
         "seeds": seeds,
     }
 
@@ -367,4 +415,11 @@ def save_experiment(result: dict, path: str | Path) -> None:
         for algo in result["algorithms"]:
             arrays[f"selected_bs/{algo}"] = result["selected_bs"][algo]
 
-    np.savez_compressed(str(path), **arrays)
+    if result.get("snr_db_best") is not None:
+        for algo in result["algorithms"]:
+            arrays[f"snr_db_best/{algo}"] = result["snr_db_best"][algo]
+
+    if result.get("snr_oracle") is not None:
+        arrays["snr_oracle"] = result["snr_oracle"]
+
+    np.savez_compressed(str(path), **arrays)  # type: ignore[arg-type]  # mypy overload signature doesn't handle **kwargs well

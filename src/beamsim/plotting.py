@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import warnings
 from pathlib import Path
 from typing import TYPE_CHECKING
 
@@ -15,6 +16,7 @@ import matplotlib
 import matplotlib.figure
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy.stats import bootstrap as _scipy_bootstrap
 
 if TYPE_CHECKING:
     pass
@@ -26,28 +28,42 @@ logger = logging.getLogger("beamsim.plotting")
 # ---------------------------------------------------------------------------
 
 ALGORITHM_PALETTE: dict[str, str] = {
-    "exhaustive":         "#1f77b4",
-    "nns":                "#2ca02c",
-    "tabu":               "#9467bd",
+    "exhaustive": "#1f77b4",
+    "nns": "#2ca02c",
+    "nns_bs_sequential": "#17a860",  # darker NNS green — BS round-robin variant
+    "tabu": "#9467bd",
     "angular_prediction": "#ff7f0e",
-    "ci":                 "#8c564b",
-    "mcmd":               "#d62728",
+    "ci": "#8c564b",
+    "mcmd": "#d62728",
+    "perfect": "#000000",
+    "ucb1": "#e377c2",  # pink — MAB UCB1
+    "thompson": "#bcbd22",  # yellow-green — MAB Thompson sampling
+    "hbm": "#aec7e8",  # light blue — hierarchical codebook (Alkhateeb 2014)
+    "omp_compressive": "#17becf",  # cyan — compressive OMP (Marzi 2016)
+    "dl_predictor": "#7f7f7f",  # grey — DL MLP beam prediction (Klautau 2018)
 }
 
 ALGORITHM_LABELS: dict[str, str] = {
-    "exhaustive":         "Exhaustive",
-    "nns":                "NNS",
-    "tabu":               "Tabu",
+    "exhaustive": "Exhaustive",
+    "nns": "NNS",
+    "nns_bs_sequential": "NNS-BS-sequential",
+    "tabu": "Tabu",
     "angular_prediction": "Angular prediction",
-    "ci":                 "Context information",
-    "mcmd":               "MCMD",
+    "ci": "Context information",
+    "mcmd": "MCMD",
+    "perfect": "Perfect knowledge",
+    "ucb1": "UCB1",
+    "thompson": "Thompson (Gaussian)",
+    "hbm": "HBM (Alkhateeb 2014)",
+    "omp_compressive": "OMP compressive (Marzi 2016)",
+    "dl_predictor": "DL predictor (MLP)",
 }
 
 # ---------------------------------------------------------------------------
 # Figure dimensions (Springer Nature column widths)
 # ---------------------------------------------------------------------------
 
-SN_SINGLE_COLUMN_INCHES: tuple[float, float] = (3.5, 2.6)   # ~89 mm wide, 4:3
+SN_SINGLE_COLUMN_INCHES: tuple[float, float] = (3.5, 2.6)  # ~89 mm wide, 4:3
 SN_DOUBLE_COLUMN_INCHES: tuple[float, float] = (7.16, 3.0)  # ~183 mm
 
 
@@ -55,34 +71,38 @@ SN_DOUBLE_COLUMN_INCHES: tuple[float, float] = (7.16, 3.0)  # ~183 mm
 # Style configuration
 # ---------------------------------------------------------------------------
 
+
 def set_publication_style() -> None:
     """Apply rcParams for Springer Nature mathphys-num journal style."""
-    plt.rcParams.update({
-        # Font
-        "mathtext.fontset":       "cm",
-        "font.family":            "serif",
-        "font.size":              9,
-        "axes.labelsize":         9,
-        "legend.fontsize":        8,
-        "xtick.labelsize":        8,
-        "ytick.labelsize":        8,
-        # Lines / axes
-        "axes.linewidth":         0.6,
-        "lines.linewidth":        1.0,
-        "legend.frameon":         False,
-        # Resolution and save settings
-        "figure.dpi":             300,
-        "savefig.dpi":            300,
-        "savefig.bbox":           "tight",
-        "savefig.transparent":    False,
-        # PDF text embedding (TrueType; reviewers can copy text)
-        "pdf.fonttype":           42,
-    })
+    plt.rcParams.update(
+        {
+            # Font
+            "mathtext.fontset": "cm",
+            "font.family": "serif",
+            "font.size": 9,
+            "axes.labelsize": 9,
+            "legend.fontsize": 8,
+            "xtick.labelsize": 8,
+            "ytick.labelsize": 8,
+            # Lines / axes
+            "axes.linewidth": 0.6,
+            "lines.linewidth": 1.0,
+            "legend.frameon": False,
+            # Resolution and save settings
+            "figure.dpi": 300,
+            "savefig.dpi": 300,
+            "savefig.bbox": "tight",
+            "savefig.transparent": False,
+            # PDF text embedding (TrueType; reviewers can copy text)
+            "pdf.fonttype": 42,
+        }
+    )
 
 
 # ---------------------------------------------------------------------------
 # Figure-size helpers
 # ---------------------------------------------------------------------------
+
 
 def fig_single_column() -> matplotlib.figure.Figure:
     """Return a new Figure sized for a single SN column (~89 mm)."""
@@ -100,35 +120,61 @@ def fig_double_column() -> matplotlib.figure.Figure:
 # Bootstrap CI helper
 # ---------------------------------------------------------------------------
 
-def _bootstrap_ci(
+
+def bootstrap_ci(
     samples: np.ndarray,
     n_boot: int,
     ci_alpha: float,
     rng: np.random.Generator,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Return (lo, hi) percentile bands over axis-0 via parametric bootstrap.
+    """Return (lo, hi) BCa bootstrap CI bands over axis-0.
 
     ``samples`` has shape (n_trials, n_x).  When n_trials == 1 the ribbon
     degenerates to the single-trial mean (lo == hi == mean).
+
+    Uses ``scipy.stats.bootstrap`` with ``method="BCa"`` for better coverage
+    on skewed distributions.  Falls back to equal lo=hi=mean when BCa is
+    degenerate (e.g. all-identical samples).
     """
     n_trials, n_x = samples.shape
     if n_trials == 1:
         mean = samples[0]
         return mean.copy(), mean.copy()
 
-    boot_means = np.empty((n_boot, n_x), dtype=np.float64)
-    for b in range(n_boot):
-        idx = rng.integers(0, n_trials, size=n_trials)
-        boot_means[b] = samples[idx].mean(axis=0)
-
-    lo = np.percentile(boot_means, 100 * (ci_alpha / 2), axis=0)
-    hi = np.percentile(boot_means, 100 * (1 - ci_alpha / 2), axis=0)
+    lo = np.empty(n_x, dtype=np.float64)
+    hi = np.empty(n_x, dtype=np.float64)
+    for j in range(n_x):
+        col = samples[:, j]
+        try:
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                res = _scipy_bootstrap(
+                    (col,),
+                    statistic=np.mean,
+                    n_resamples=n_boot,
+                    confidence_level=1.0 - ci_alpha,
+                    method="BCa",
+                    random_state=rng,
+                )
+            lo_v = float(res.confidence_interval.low)
+            hi_v = float(res.confidence_interval.high)
+            if not (np.isfinite(lo_v) and np.isfinite(hi_v)):
+                raise ValueError("BCa degenerate")
+        except Exception:
+            lo_v = hi_v = float(col.mean())
+        lo[j] = lo_v
+        hi[j] = hi_v
     return lo, hi
+
+
+# Keep private alias for internal callers that predate the public rename.
+_bootstrap_ci = bootstrap_ci
 
 
 # ---------------------------------------------------------------------------
 # Core plotting primitive
 # ---------------------------------------------------------------------------
+
 
 def plot_curves_with_ci(
     x: np.ndarray,
@@ -190,10 +236,10 @@ def plot_curves_with_ci(
     for algo_key, traces in traces_per_algo.items():
         traces = np.asarray(traces, dtype=np.float64)
         if traces.ndim == 1:
-            traces = traces[np.newaxis, :]   # (1, n_x)
-        n_trials, n_x = traces.shape
+            traces = traces[np.newaxis, :]  # (1, n_x)
+        n_trials, _n_x = traces.shape
 
-        color = ALGORITHM_PALETTE.get(algo_key, None)
+        color = ALGORITHM_PALETTE.get(algo_key)
         label = ALGORITHM_LABELS.get(algo_key, algo_key)
 
         mean = traces.mean(axis=0)
@@ -208,7 +254,10 @@ def plot_curves_with_ci(
 
         logger.info(
             "%s: n_trials=%d, mean=%.4g, CI half-width=%.4g",
-            algo_key, n_trials, float(mean.mean()), half_width,
+            algo_key,
+            n_trials,
+            float(mean.mean()),
+            half_width,
         )
 
     ax.legend(loc=legend_loc)
@@ -219,6 +268,7 @@ def plot_curves_with_ci(
 # Save helper
 # ---------------------------------------------------------------------------
 
+
 def save_figure(fig: matplotlib.figure.Figure, path: str | Path) -> None:
     """Save *fig* as a PDF with tight layout; log file size and page dims."""
     dest = Path(path)
@@ -228,13 +278,17 @@ def save_figure(fig: matplotlib.figure.Figure, path: str | Path) -> None:
     w_in, h_in = fig.get_size_inches()
     logger.info(
         "Saved %s  (%.1f KB, %.2f x %.2f in)",
-        dest, size_kb, w_in, h_in,
+        dest,
+        size_kb,
+        w_in,
+        h_in,
     )
 
 
 # ---------------------------------------------------------------------------
 # Specialised wrappers — one per experiment
 # ---------------------------------------------------------------------------
+
 
 def plot_rotational(
     npz_path: str | Path,
@@ -256,7 +310,9 @@ def plot_rotational(
     ax = fig.add_subplot(111)
 
     plot_curves_with_ci(
-        x, traces, ax,
+        x,
+        traces,
+        ax,
         xlabel="Rotational velocity (rpm)",
         ylabel="Mean received power (dB)",
         xscale="log",
@@ -264,8 +320,13 @@ def plot_rotational(
     )
 
     if gamma_th_db is not None:
-        ax.axhline(gamma_th_db, color="k", linewidth=0.6, linestyle="--",
-                   label=rf"$\Gamma_{{th}}={gamma_th_db}\,\mathrm{{dB}}$")
+        ax.axhline(
+            gamma_th_db,
+            color="k",
+            linewidth=0.6,
+            linestyle="--",
+            label=rf"$\Gamma_{{th}}={gamma_th_db}\,\mathrm{{dB}}$",
+        )
         ax.legend()
 
     dest = Path(output_path)
@@ -290,15 +351,22 @@ def plot_alpha_sweep(
     ax = fig.add_subplot(111)
 
     plot_curves_with_ci(
-        x, traces, ax,
+        x,
+        traces,
+        ax,
         xlabel=r"Measurement-rate factor $\alpha$",
         ylabel="Coverage rate",
         xscale="log",
         yscale="linear",
     )
 
-    ax.axhline(gamma_th_db, color="k", linewidth=0.6, linestyle="--",
-               label=rf"$\Gamma_{{th}}={gamma_th_db}\,\mathrm{{dB}}$")
+    ax.axhline(
+        gamma_th_db,
+        color="k",
+        linewidth=0.6,
+        linestyle="--",
+        label=rf"$\Gamma_{{th}}={gamma_th_db}\,\mathrm{{dB}}$",
+    )
     ax.legend()
 
     dest = Path(output_path)
@@ -323,15 +391,22 @@ def plot_snr_sweep(
     ax = fig.add_subplot(111)
 
     plot_curves_with_ci(
-        x, traces, ax,
+        x,
+        traces,
+        ax,
         xlabel="Input SNR (dB)",
         ylabel="Coverage rate",
         xscale="linear",
         yscale="linear",
     )
 
-    ax.axhline(gamma_th_db, color="k", linewidth=0.6, linestyle="--",
-               label=rf"$\Gamma_{{th}}={gamma_th_db}\,\mathrm{{dB}}$")
+    ax.axhline(
+        gamma_th_db,
+        color="k",
+        linewidth=0.6,
+        linestyle="--",
+        label=rf"$\Gamma_{{th}}={gamma_th_db}\,\mathrm{{dB}}$",
+    )
     ax.legend()
 
     dest = Path(output_path)
@@ -355,7 +430,9 @@ def plot_handover(
     ax = fig.add_subplot(111)
 
     plot_curves_with_ci(
-        x, traces, ax,
+        x,
+        traces,
+        ax,
         xlabel="Occasion / distance",
         ylabel=r"$L_{\mathrm{BS}}$ (dB)",
         xscale="linear",
@@ -371,6 +448,7 @@ def plot_handover(
 # ---------------------------------------------------------------------------
 # Private utility
 # ---------------------------------------------------------------------------
+
 
 def _extract_traces(data: np.lib.npyio.NpzFile) -> dict[str, np.ndarray]:
     """Parse an NPZ file produced by the runner into algo->traces mapping.
