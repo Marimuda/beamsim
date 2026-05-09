@@ -213,6 +213,7 @@ def train(
     logger.info("Training samples: %d  |  Test samples: %d", len(X_tr), len(X_te))
 
     device = torch.device("cpu")
+    model: nn.Module
     if model_kind == "mlp":
         model = BeamPredictorMLP(INPUT_DIM, OUTPUT_DIM).to(device)
     else:
@@ -272,7 +273,7 @@ def train(
         ckpt["n_layers"] = 1
     torch.save(ckpt, output_path)
     logger.info("Checkpoint saved to %s", output_path)
-    print(f"Final test accuracy: {acc * 100:.2f}%")
+    logger.info("Final test accuracy: %.2f%%", acc * 100)
     return acc
 
 

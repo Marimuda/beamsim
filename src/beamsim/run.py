@@ -19,6 +19,7 @@ installed in editable mode or from a wheel.
 
 from __future__ import annotations
 
+import logging
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -35,6 +36,8 @@ from beamsim.channel import (
 from beamsim.geometry import Track, rotation_track, straight_line_track
 from beamsim.link_budget import tx_amp_for_snr_db
 from beamsim.runner import Experiment, run_experiment, save_experiment
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Picklable track factories (module-level so ProcessPoolExecutor can pickle)
@@ -322,12 +325,12 @@ def run_from_config(cfg: DictConfig) -> None:
             )
             result = run_experiment(exp, n_workers=n_workers, progress=False)
             save_experiment(result, output_dir / f"snr_{snr_db:+.1f}.npz")
-            print(f"[snr_sweep] {i + 1}/{len(sweep_vals)} : SNR={snr_db:+.1f} dB done")
+            logger.info("[snr_sweep] %d/%d : SNR=%+.1f dB done", i + 1, len(sweep_vals), snr_db)
 
     else:
         raise ValueError(f"Unknown sweep variable: {sweep_var!r}")
 
-    print(f"Results written to: {output_dir}")
+    logger.info("Results written to: %s", output_dir)
 
 
 # ---------------------------------------------------------------------------
@@ -353,7 +356,7 @@ def main(cfg: DictConfig) -> None:
     so absolute references ``/scenario``, ``/sweep``, ``/algo`` in defaults
     lists resolve correctly.
     """
-    print(OmegaConf.to_yaml(cfg))
+    logger.info("Resolved config:\n%s", OmegaConf.to_yaml(cfg))
     run_from_config(cfg)
 
 
