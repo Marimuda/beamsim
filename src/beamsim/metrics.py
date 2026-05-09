@@ -105,6 +105,144 @@ def bs_selection_loss(
     return float(np.mean(loss_db))
 
 
+def probing_overhead(
+    obp_history: NDArray[np.int_],
+    n_arms: int | None = None,
+) -> float:
+    """Distinct-arm probing overhead per trial, normalised to [0, 1].
+
+    The 3GPP TR 38.843 evaluation framework asks for an "overhead" metric
+    expressed as the fraction of beams probed relative to the full
+    codebook.  Algorithms that exhaustively scan have overhead ≈ 1; an
+    oracle that picks the right beam every step has overhead ≈ 1 / n_arms.
+
+    Parameters
+    ----------
+    obp_history:
+        Either a (n_steps, 2) array of (k, l) OBP indices for one trial,
+        OR a (n_trials, n_steps, 2) array — the function squeezes the
+        leading dimension if present and returns the *per-trial* mean
+        overhead.
+    n_arms:
+        Total number of beam pairs (K * L).  If None, inferred from
+        the maximum (k, l) pair seen in the history.
+    """
+    arr = np.asarray(obp_history)
+    if arr.ndim == 3:
+        return float(np.mean([probing_overhead(arr[t], n_arms) for t in range(arr.shape[0])]))
+    if arr.ndim != 2 or arr.shape[1] != 2:
+        raise ValueError(f"expected (n_steps, 2) or (n_trials, n_steps, 2), got shape {arr.shape}")
+    flat_pairs = arr[:, 0] * (arr[:, 1].max() + 1) + arr[:, 1]
+    distinct = len(np.unique(flat_pairs))
+    if n_arms is None:
+        n_arms = (int(arr[:, 0].max()) + 1) * (int(arr[:, 1].max()) + 1)
+    return distinct / max(n_arms, 1)
+
+
+def top_k_accuracy(
+    obp_pred: NDArray[np.int_],
+    obp_true: NDArray[np.int_],
+    k_top: int = 1,
+    L: int | None = None,
+) -> float:
+    """Top-k OBP-match accuracy across (trials, occasions).
+
+    Parameters
+    ----------
+    obp_pred:
+        (n_trials, n_steps, 2) OBP indices produced by the algorithm.
+    obp_true:
+        (n_trials, n_steps, 2) ground-truth OBP from a Perfect / oracle
+        baseline (or Exhaustive on a noiseless channel).
+    k_top:
+        ``k_top=1`` is exact match.  ``k_top=4`` accepts any 4-connected
+        neighbour of the true OBP — useful when one beam off is acceptable.
+    L:
+        BS codebook size, used to compute neighbour membership.  If None,
+        falls back to exact match (k_top is ignored).
+
+    Returns
+    -------
+    Fraction in [0, 1].
+    """
+    pred = np.asarray(obp_pred)
+    true = np.asarray(obp_true)
+    if pred.shape != true.shape:
+        raise ValueError(f"shape mismatch: pred {pred.shape} vs true {true.shape}")
+    if pred.ndim == 2:
+        pred = pred[None, :, :]
+        true = true[None, :, :]
+    if k_top == 1 or L is None:
+        return float(np.mean(np.all(pred == true, axis=-1)))
+    # Top-k for k>1: accept any 4-connected neighbour at Manhattan <= radius.
+    diff = np.abs(pred - true)
+    return float(np.mean(diff.sum(axis=-1) <= 1))
+
+
+def time_to_realign(
+    snr_db: NDArray[np.float64],
+    threshold_db: float,
+    handover_step: int,
+    max_search: int = 200,
+) -> NDArray[np.int_]:
+    """Steps until SNR exceeds ``threshold_db`` after a handover trigger.
+
+    Parameters
+    ----------
+    snr_db:
+        (n_trials, n_steps) SNR-in-dB trace.
+    threshold_db:
+        Realignment threshold in dB; the recovery is considered complete
+        the first step at which ``snr_db >= threshold_db`` after the
+        handover.
+    handover_step:
+        Index of the handover event.  Steps before this are ignored.
+    max_search:
+        If recovery never occurs within ``handover_step + max_search``
+        steps, the trial is recorded as ``max_search`` (capped, censored).
+
+    Returns
+    -------
+    (n_trials,) integer array of recovery times in steps.
+    """
+    snr = np.asarray(snr_db)
+    if snr.ndim != 2:
+        raise ValueError(f"expected 2-D snr_db, got shape {snr.shape}")
+    n_trials = snr.shape[0]
+    out = np.full(n_trials, max_search, dtype=np.int_)
+    end = min(handover_step + max_search, snr.shape[1])
+    for t in range(n_trials):
+        post = snr[t, handover_step:end]
+        idx = np.argmax(post >= threshold_db)
+        # argmax returns 0 if no True; check whether [0] is actually >= threshold.
+        if post.size > 0 and post[idx] >= threshold_db:
+            out[t] = int(idx)
+        else:
+            out[t] = max_search
+    return out
+
+
+def outage_fraction(
+    snr_db: NDArray[np.float64],
+    threshold_db: float,
+) -> NDArray[np.float64]:
+    """Per-trial fraction of occasions with SNR below ``threshold_db``.
+
+    Parameters
+    ----------
+    snr_db:
+        (n_trials, n_steps) SNR-in-dB trace.
+    threshold_db:
+        Outage threshold in dB.  Anything strictly below this is in outage.
+
+    Returns
+    -------
+    Shape (n_trials,), values in [0, 1].
+    """
+    snr = np.asarray(snr_db)
+    return (snr < threshold_db).mean(axis=1)
+
+
 def bootstrap_ci(
     samples: NDArray[np.float64],
     alpha: float = 0.05,

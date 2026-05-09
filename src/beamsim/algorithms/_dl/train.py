@@ -40,6 +40,7 @@ DT = 1e-3
 def _build_features_labels(
     obp_history: np.ndarray,
     window: int = WINDOW,
+    sequence: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
     """Sliding-window features and labels from one OBP trajectory.
 
@@ -49,27 +50,43 @@ def _build_features_labels(
         Array of shape (T, 2) with (k, l) OBP at each step.
     window:
         History window size.
+    sequence:
+        If True, return shape (T-window, window, 2) for LSTM-style input;
+        otherwise flatten to (T-window, 2*window) for an MLP.
 
     Returns
     -------
-    X : float32, (T-window, 2*window)
+    X : float32, (T-window, ...)  per ``sequence`` flag.
     y : int64,   (T-window,)   flat index = k*L_BS + l
     """
     T = len(obp_history)
     n = T - window
-    X = np.zeros((n, 2 * window), dtype=np.float32)
+    if sequence:
+        X = np.zeros((n, window, 2), dtype=np.float32)
+        for i in range(n):
+            X[i] = obp_history[i : i + window].astype(np.float32)
+    else:
+        X = np.zeros((n, 2 * window), dtype=np.float32)
+        for i in range(n):
+            X[i] = obp_history[i : i + window].ravel().astype(np.float32)
     y = np.zeros(n, dtype=np.int64)
     for i in range(n):
-        X[i] = obp_history[i : i + window].ravel().astype(np.float32)
         k_next, l_next = obp_history[i + window]
         y[i] = int(k_next) * L_BS + int(l_next)
     return X, y
 
 
 def _collect_data(
-    n_trajectories: int, n_steps: int, seed: int = 0
+    n_trajectories: int,
+    n_steps: int,
+    seed: int = 0,
+    sequence: bool = False,
 ) -> tuple[np.ndarray, np.ndarray]:
-    """Run Exhaustive on Case A UMi 10 m/s and collect OBP trajectories."""
+    """Run Exhaustive on Case A UMi 10 m/s and collect OBP trajectories.
+
+    ``sequence=True`` produces (N, window, 2) features for an LSTM;
+    otherwise (N, 2*window) for an MLP.
+    """
     from beamsim.algorithms.exhaustive import Exhaustive
     from beamsim.bplm import BPLMState
     from beamsim.channel import ChannelParams, ChannelRealisation
@@ -124,7 +141,7 @@ def _collect_data(
             k_obp, l_obp = state.obp()
             obp_hist[m] = [k_obp, l_obp]
 
-        X, y = _build_features_labels(obp_hist, window=WINDOW)
+        X, y = _build_features_labels(obp_hist, window=WINDOW, sequence=sequence)
         all_X.append(X)
         all_y.append(y)
 
@@ -140,8 +157,18 @@ def train(
     lr: float = 1e-3,
     output_path: Path = Path("models/beam_predictor.pt"),
     seed: int = 42,
+    model_kind: str = "mlp",
 ) -> float:
-    """Train BeamPredictorMLP and save checkpoint.  Returns test accuracy."""
+    """Train a beam-predictor (MLP or LSTM) and save the checkpoint.
+
+    ``model_kind="mlp"`` (default) trains the original MLP on flattened
+    OBP windows; ``model_kind="lstm"`` trains the LSTM variant on
+    sequences and saves with ``input_dim=2``.
+
+    Returns
+    -------
+    Test accuracy (float in [0, 1]).
+    """
     try:
         import torch
         import torch.nn as nn
@@ -157,10 +184,24 @@ def train(
     except ImportError:
         USE_TQDM = False
 
-    from beamsim.algorithms._dl.mlp_predictor import BeamPredictorMLP
+    if model_kind == "mlp":
+        from beamsim.algorithms._dl.mlp_predictor import BeamPredictorMLP
 
-    logger.info("Collecting training data (%d trajectories x %d steps)...", N_TRAJECTORIES, N_STEPS)
-    X_all, y_all = _collect_data(N_TRAJECTORIES, N_STEPS, seed=seed)
+        sequence = False
+    elif model_kind == "lstm":
+        from beamsim.algorithms._dl.lstm_predictor import BeamPredictorLSTM
+
+        sequence = True
+    else:
+        raise ValueError(f"unknown model_kind={model_kind!r}; expected 'mlp' or 'lstm'")
+
+    logger.info(
+        "Collecting training data (%d trajectories x %d steps, model=%s)...",
+        N_TRAJECTORIES,
+        N_STEPS,
+        model_kind,
+    )
+    X_all, y_all = _collect_data(N_TRAJECTORIES, N_STEPS, seed=seed, sequence=sequence)
 
     # Train/test split (80/20)
     rng = np.random.default_rng(seed)
@@ -172,7 +213,10 @@ def train(
     logger.info("Training samples: %d  |  Test samples: %d", len(X_tr), len(X_te))
 
     device = torch.device("cpu")
-    model = BeamPredictorMLP(INPUT_DIM, OUTPUT_DIM).to(device)
+    if model_kind == "mlp":
+        model = BeamPredictorMLP(INPUT_DIM, OUTPUT_DIM).to(device)
+    else:
+        model = BeamPredictorLSTM(input_dim=2, hidden_dim=64, output_dim=OUTPUT_DIM).to(device)
     optimizer = torch.optim.Adam(model.parameters(), lr=lr)
     criterion = nn.CrossEntropyLoss()
 
@@ -212,17 +256,21 @@ def train(
     # Save checkpoint
     output_path = Path(output_path)
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save(
-        {
-            "model_state": model.state_dict(),
-            "input_dim": INPUT_DIM,
-            "output_dim": OUTPUT_DIM,
-            "K": K_UE,
-            "L": L_BS,
-            "window": WINDOW,
-        },
-        output_path,
-    )
+    ckpt = {
+        "model_state": model.state_dict(),
+        "output_dim": OUTPUT_DIM,
+        "K": K_UE,
+        "L": L_BS,
+        "window": WINDOW,
+        "model_kind": model_kind,
+    }
+    if model_kind == "mlp":
+        ckpt["input_dim"] = INPUT_DIM
+    else:
+        ckpt["input_dim"] = 2
+        ckpt["hidden_dim"] = 64
+        ckpt["n_layers"] = 1
+    torch.save(ckpt, output_path)
     logger.info("Checkpoint saved to %s", output_path)
     print(f"Final test accuracy: {acc * 100:.2f}%")
     return acc
@@ -231,21 +279,37 @@ def train(
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(message)s")
     parser = argparse.ArgumentParser(
-        description="Train BeamPredictorMLP (DL beam prediction baseline)"
+        description="Train BeamPredictor (DL beam-prediction baseline; MLP or LSTM)"
     )
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--batch-size", type=int, default=256)
     parser.add_argument("--lr", type=float, default=1e-3)
-    parser.add_argument("--output", type=Path, default=Path("models/beam_predictor.pt"))
+    parser.add_argument(
+        "--model",
+        choices=("mlp", "lstm"),
+        default="mlp",
+        help="Architecture: mlp (Klautau-style flat-window) or lstm (Kim-2023 sequence)",
+    )
+    parser.add_argument(
+        "--output",
+        type=Path,
+        default=None,
+        help="Checkpoint output path; defaults to models/beam_predictor{,_lstm}.pt",
+    )
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--n-trajectories", type=int, default=N_TRAJECTORIES)
     args = parser.parse_args()
+    if args.output is None:
+        args.output = Path(
+            "models/beam_predictor.pt" if args.model == "mlp" else "models/beam_predictor_lstm.pt"
+        )
     train(
         epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
         output_path=args.output,
         seed=args.seed,
+        model_kind=args.model,
     )
 
 

@@ -2,6 +2,7 @@ from beamsim.algorithms.angular_prediction import AngularPrediction
 from beamsim.algorithms.bai import BAIPureExploration
 from beamsim.algorithms.base import Algorithm
 from beamsim.algorithms.ci import ContextInformation
+from beamsim.algorithms.dl_lstm_predictor import DLLSTMPredictor
 from beamsim.algorithms.dl_predictor import DLPredictor
 from beamsim.algorithms.ekf_tracker import EKFTracker
 from beamsim.algorithms.exhaustive import Exhaustive
@@ -31,6 +32,7 @@ ALL_ALGORITHMS = {
     "hbm": HBM,
     "omp_compressive": OMPCompressive,
     "dl_predictor": DLPredictor,
+    "dl_lstm_predictor": DLLSTMPredictor,
     "mamba": MAMBA,
     "ekf_tracker": EKFTracker,
     "position_mab": PositionMAB,
@@ -48,6 +50,7 @@ __all__ = [
     "AngularPrediction",
     "BAIPureExploration",
     "ContextInformation",
+    "DLLSTMPredictor",
     "DLPredictor",
     "EKFTracker",
     "Exhaustive",

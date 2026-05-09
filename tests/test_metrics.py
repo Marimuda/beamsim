@@ -10,7 +10,11 @@ from beamsim.metrics import (
     bs_selection_loss,
     coverage_rate,
     mean_snr_db,
+    outage_fraction,
     output_snr_db,
+    probing_overhead,
+    time_to_realign,
+    top_k_accuracy,
 )
 
 # ---------------------------------------------------------------------------
@@ -160,6 +164,100 @@ def test_bootstrap_ci_symmetric_distribution():
     # |lo - mean| and |hi - mean| should both be positive and similar magnitude
     assert mean - lo > 0
     assert hi - mean > 0
+
+
+# ---------------------------------------------------------------------------
+# probing_overhead, top_k_accuracy, time_to_realign, outage_fraction
+# ---------------------------------------------------------------------------
+
+
+def test_probing_overhead_exhaustive_vs_oracle():
+    """Exhaustive (every (k, l) once) → overhead 1; oracle (one pair) → 1/n_arms."""
+    K, L = 4, 8
+    n_arms = K * L
+    # Exhaustive: row-major sweep of all 32 pairs.
+    obp_exhaust = np.array([(k, l) for k in range(K) for l in range(L)], dtype=int)
+    assert probing_overhead(obp_exhaust, n_arms=n_arms) == pytest.approx(1.0)
+
+    # Oracle: always (3, 5).
+    obp_oracle = np.tile(np.array([3, 5], dtype=int), (50, 1))
+    assert probing_overhead(obp_oracle, n_arms=n_arms) == pytest.approx(1.0 / n_arms)
+
+
+def test_probing_overhead_handles_3d_history():
+    """Pass a (n_trials, n_steps, 2) array and get the per-trial mean."""
+    K, L = 4, 8
+    n_arms = K * L
+    obp_a = np.tile(np.array([0, 0], dtype=int), (10, 1))  # 1 distinct
+    obp_b = np.array([(k, 0) for k in range(K)] + [(0, 0)] * 6, dtype=int)  # K distinct
+    obp_3d = np.stack([obp_a, obp_b], axis=0)  # (2, 10, 2)
+    overhead = probing_overhead(obp_3d, n_arms=n_arms)
+    expected = (1 / n_arms + K / n_arms) / 2
+    assert overhead == pytest.approx(expected, abs=1e-9)
+
+
+def test_top_k_accuracy_exact_match():
+    pred = np.array([[(0, 0), (1, 2), (3, 7)]], dtype=int)
+    true = np.array([[(0, 0), (1, 2), (3, 7)]], dtype=int)
+    assert top_k_accuracy(pred, true, k_top=1) == 1.0
+
+
+def test_top_k_accuracy_partial_match():
+    pred = np.array([[(0, 0), (1, 2), (5, 5)]], dtype=int)
+    true = np.array([[(0, 0), (1, 2), (3, 7)]], dtype=int)
+    # 2 out of 3 exact match.
+    assert top_k_accuracy(pred, true, k_top=1) == pytest.approx(2 / 3)
+
+
+def test_top_k_accuracy_neighbour_credit():
+    """k_top > 1 should accept 4-connected neighbours of the true OBP."""
+    pred = np.array([[(0, 1), (1, 2)]], dtype=int)
+    true = np.array([[(0, 0), (1, 2)]], dtype=int)
+    # Exact: 1/2 (only second matches).
+    assert top_k_accuracy(pred, true, k_top=1) == pytest.approx(0.5)
+    # 4-connected neighbour radius 1: pred (0,1) is 1 hop from (0,0) → counts.
+    # Both should match → 1.0.
+    assert top_k_accuracy(pred, true, k_top=4, L=8) == pytest.approx(1.0)
+
+
+def test_time_to_realign_immediate_recovery():
+    """If SNR is above threshold immediately after handover, recovery time = 0."""
+    snr = np.full((3, 50), 20.0)
+    times = time_to_realign(snr, threshold_db=10.0, handover_step=20, max_search=20)
+    np.testing.assert_array_equal(times, np.zeros(3, dtype=int))
+
+
+def test_time_to_realign_delayed_recovery():
+    """SNR rises above threshold k steps after handover → recovery time = k."""
+    snr = np.full((1, 100), 0.0)
+    snr[0, 30:] = 20.0  # recovers at step 30; handover at step 25 → time 5.
+    times = time_to_realign(snr, threshold_db=10.0, handover_step=25, max_search=50)
+    assert times[0] == 5
+
+
+def test_time_to_realign_censored():
+    """If recovery never happens in the search window, return max_search."""
+    snr = np.full((2, 100), -5.0)  # always below threshold
+    times = time_to_realign(snr, threshold_db=10.0, handover_step=10, max_search=20)
+    np.testing.assert_array_equal(times, np.full(2, 20, dtype=int))
+
+
+def test_outage_fraction_known():
+    """5/10 steps below threshold → outage = 0.5."""
+    row = np.array([5.0] * 5 + [15.0] * 5)
+    snr = np.tile(row, (3, 1))
+    out = outage_fraction(snr, threshold_db=10.0)
+    np.testing.assert_allclose(out, [0.5, 0.5, 0.5])
+
+
+def test_outage_fraction_complement_of_coverage():
+    """outage_fraction + coverage_rate = 1 (modulo strictness on equality)."""
+    rng = np.random.default_rng(0)
+    snr = rng.uniform(-5, 25, size=(10, 50))
+    out = outage_fraction(snr, threshold_db=10.0)
+    cov = coverage_rate(snr, gamma_th_db=10.0)
+    # Coverage uses >=, outage uses < — they sum to exactly 1.
+    np.testing.assert_allclose(out + cov, np.ones_like(out), atol=1e-12)
 
 
 def test_bootstrap_ci_coverage_rate():

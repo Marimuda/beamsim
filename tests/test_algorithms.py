@@ -1265,3 +1265,35 @@ def test_bai_pure_exploration_eliminates_obviously_bad_arms():
     assert n_active <= n_arms // 2 + 2, (
         f"BAI failed to eliminate any clearly-bad arms; active={n_active}/{n_arms}"
     )
+
+
+def test_dl_lstm_predictor_falls_back_when_no_checkpoint():
+    """DLLSTMPredictor must fall back to Exhaustive when no checkpoint."""
+    import warnings
+
+    from beamsim.algorithms.dl_lstm_predictor import DLLSTMPredictor
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = DLLSTMPredictor(checkpoint="/tmp/nonexistent_lstm_zzz.pt")
+    state = make_state()
+    bs_xy = np.array([10.0, 0.0])
+    context = {
+        "ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
+        "bs_xy": bs_xy,
+        "bs_yaw": 0.0,
+    }
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+    rng = np.random.default_rng(0)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        algo.reset(state, context)
+        for m in range(20):
+            k, l = algo.select_next_mbp(state, m, context)
+            assert 0 <= k < state.K
+            assert 0 <= l < state.L
+            state.measure(k, l, H, m, rng)
+
+    assert caught, "Expected at least one warning from DLLSTMPredictor fallback"
+    assert any(issubclass(w.category, UserWarning) for w in caught)
