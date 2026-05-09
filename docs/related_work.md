@@ -35,6 +35,34 @@ does not cover the full lifecycle. Specifically, it does not model
 beam-failure-recovery RACH procedures, multi-TRP coordination signalling,
 or NR-style measurement-report quantisation.
 
+### Initial access vs. tracking vs. recovery
+
+Modern beam management is more usefully read as three distinct stages,
+each with its own constraints, baselines, and performance criteria:
+
+- **Initial access / acquisition** — find a viable beam pair from
+  little or no prior state. Exhaustive sweep is the canonical baseline;
+  hierarchical search and compressive sensing are the principled
+  reductions. In `beamsim` this stage is `Exhaustive`, `HBM`,
+  `OMPCompressive`, and the warm-up phase of every adaptive algorithm.
+- **Tracking** — maintain a good beam pair under mobility and blockage
+  using prior state. Steepest-ascent neighbour search, tabu search,
+  position-aided MAB, EKF, MAMBA, MCMD, and the DL predictors all live
+  here. This is the stage `beamsim` evaluates most carefully.
+- **Recovery** — re-establish alignment after blockage failure or
+  severe degradation. 3GPP NR specifies an explicit beam-failure
+  detection and recovery (BFR) procedure with RACH-based reacquisition.
+
+**Recovery is out of scope for `beamsim`.** Algorithms degrade
+gracefully under Model A blockage (the channel pushes them back into
+exploration), but the simulator does not model BFR signalling, RACH
+latency, or beam-failure-instance counters. The
+`metrics.time_to_realign` helper measures *handover-style* recovery —
+the steps until SNR re-crosses a threshold after an explicit
+handover_step trigger — which is a useful proxy but not 3GPP-conformant
+BFR. Cross-trial reacquisition-time-after-blockage instrumentation is
+on the roadmap (see [`ROADMAP.md`](ROADMAP.md)).
+
 ## The bottleneck shifted toward overhead and latency
 
 With larger arrays, narrower beams, multi-panel devices, and FR2

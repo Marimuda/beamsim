@@ -62,6 +62,35 @@ measurement-reporting signalling pipeline.
 [`docs/related_work.md`](docs/related_work.md) explains why and points at
 the projects that do.
 
+## Methodological commitments
+
+Beyond the algorithm zoo, `beamsim` is built around three evaluation
+commitments that we argue are what makes a beam-management comparison
+defensible:
+
+- **Common random numbers (CRN) across algorithms.** Within a trial,
+  the channel realisation, the mobility track, and the per-(k, l)
+  noise sample are bit-identical across every algorithm under
+  comparison. This is a *paired* evaluation: differences between
+  algorithms come from policy choices, not from one algorithm getting
+  an easier scenario than another. See `runner.py` for the seed-stream
+  factoring (channel / track / per-algo noise) and
+  [`docs/architecture.md`](docs/architecture.md) for the full
+  determinism contract.
+- **Codebook-oracle regret as a first-class diagnostic.** Raw SNR
+  conflates scenario difficulty with policy quality.
+  `metrics.oracle_snr_db` returns the strongest SNR achievable on the
+  same codebook and channel; `metrics.snr_regret_db` returns the
+  per-step gap. Two policies with similar mean SNR can have very
+  different regret profiles, and the regret is what you should
+  publish.
+- **Overhead, switching, and outage as named metrics.** Modern
+  evaluation reports a *budget*, not just a quality.
+  [`docs/SOTA_BASELINES.md`](docs/SOTA_BASELINES.md) lists the metric
+  surface — `probing_overhead`, `beam_switch_rate`,
+  `outage_probability`, `top_k_accuracy`, `time_to_realign` — that
+  papers built on `beamsim` are encouraged to adopt.
+
 ## Supported environments
 
 - **OS**: Linux, macOS. Windows is not actively tested.

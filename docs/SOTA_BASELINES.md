@@ -44,6 +44,41 @@ so multi-trial Monte Carlo is reproducible).
 
 ---
 
+## Algorithms by measurement budget
+
+A more useful classification than "exhaustive vs. heuristic vs. ML" is
+**how many beam pairs the algorithm probes per decision** and **what it
+relies on to keep that count down**.  The lower the budget, the more
+the algorithm depends on temporal continuity, side information, or
+learned priors — and the worse it tends to fail when those assumptions
+break.
+
+| Tier | Budget per decision | Reliance | Algorithms in this repo |
+|---|---|---|---|
+| **High — oracle-like** | $K\\cdot L$ (full sweep every step) | None: a brute-force baseline. | `Exhaustive` |
+| **Reduced — coarse-to-fine** | $O(\\log K + \\log L)$ when the hierarchy holds; falls back to $K\\cdot L$ when it does not. | Codebook hierarchy validity. | `HBM` |
+| **Compressive** | $O(\\log K \\cdot \\log L)$ random or structured probes. | Channel sparsity in the angle domain. | `OMPCompressive` |
+| **Low — local / temporal** | One probe + a few neighbours; reuses the previous OBP between probes. | Mobility coherence between steps. | `NNS`, `NNSBSSequential`, `Tabu`, `AngularPrediction` |
+| **Adaptive — uncertainty-aware** | One probe per step, but where it probes is controlled by belief state, regret estimates, or freshness. | Stationarity assumptions of the policy class. | `UCB1`, `ThompsonGaussian`, `BAIPureExploration`, `MAMBA`, `MCMD`, `EKFTracker`, `PositionMAB` |
+| **Predictive — context-aided** | One probe (the predicted beam), no exploration unless prediction confidence collapses. | Trained model + matching deployment statistics. | `DLPredictor`, `DLLSTMPredictor`, `ContextInformation` |
+| **Genie** | Zero probes — reads the true channel. | None physical: oracle for diagnosis only. | `Perfect` |
+
+Practical reading order when comparing on a new scenario: start with
+`Exhaustive` and `Perfect` to bracket what's achievable; then run one
+representative from each lower tier; then probe the failure modes
+(mobility regime, blockage rate, SNR) that should hurt each tier.
+
+> Note that `beamsim` currently issues **one BPLM measurement per step**
+> for every algorithm — the `Algorithm` interface does not yet let
+> policies declare a per-step probe budget greater than one. The tiers
+> above describe the *target* measurement budget each policy is meant
+> to operate under in the literature; the simulator collapses that to
+> a one-step-one-probe schedule for like-for-like comparison. Native
+> per-algorithm probe budgets are tracked under
+> [`ROADMAP.md`](ROADMAP.md).
+
+---
+
 ## Per-algorithm notes
 
 ### `UCB1` — stationary multi-armed bandit (Auer 2002)
@@ -301,14 +336,21 @@ If a future algorithm is added, it must follow the same convention.
 |---|---|
 | `output_snr_db` | Per-step SNR in dB. |
 | `mean_snr_db` | Trial-mean SNR in dB. |
-| `coverage_rate(γ_th)` | Fraction of steps with SNR ≥ γ_th. |
-| `outage_fraction(γ_th)` | Complement: fraction below γ_th. |
+| `coverage_rate(γ_th)` | Fraction of steps with SNR ≥ γ_th (per trial). |
+| `outage_fraction(γ_th)` | Complement: fraction below γ_th (per trial). |
+| `outage_probability(γ_th)` | Pooled `Pr(SNR_dB < γ_th)` across trials and steps; NaN-propagating. |
+| `oracle_snr_db` | Per-step **codebook** oracle: `max_{k,l} 10·log10(\|w_k^H H f_l\|² / σ_n²)`. The strongest comparator a measurement policy could achieve given the same codebook and channel realisation. *Not* Shannon capacity. |
+| `snr_regret_db` | Per-step gap to the codebook oracle: `oracle - achieved`, lower is better, zero is optimal. |
+| `beam_switch_rate` | Fraction of consecutive step pairs at which (k, l) changes — proxy for control-plane churn. |
 | `bs_selection_loss` | L_BS in dB (handover quality). |
 | `probing_overhead` | Distinct-arm probe count, normalised — for the 3GPP TR 38.843 overhead-vs-accuracy curve. |
 | `top_k_accuracy` | Top-1 / top-k OBP-match against an oracle. |
-| `time_to_realign` | Steps to recover SNR ≥ threshold after a handover trigger. |
+| `time_to_realign` | Steps to recover SNR ≥ threshold after an explicit handover trigger. **Not** 3GPP BFR. |
 | `bootstrap_ci` | BCa bootstrap CI for the mean (scipy.stats.bootstrap wrapper). |
 
 These cover the headline metrics from 3GPP TR 38.843 §6.3 (beam
 prediction accuracy) and §6.4 (overhead reduction), plus the handover
-continuity metrics that few simulation papers report.
+continuity metrics that few simulation papers report. The
+codebook-oracle / regret pair gives a scenario-normalised diagnostic:
+two algorithms that look similar on raw SNR can have very different
+regret profiles once the per-step achievable ceiling is factored in.

@@ -64,5 +64,6 @@ nav:
   - Development: development.md
   - SOTA baselines: SOTA_BASELINES.md
   - Related work: related_work.md
+  - Roadmap: ROADMAP.md
   - API reference: api.md
   - Changelog: changelog.md
