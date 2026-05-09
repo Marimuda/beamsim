@@ -7,6 +7,38 @@ public surface is still pre-1.0 — minor versions may break API.
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-05-09
+
+Patch release: codebook-oracle SNR is now computed for single-BS experiments,
+not just multi-BS, so the regret diagnostics shipped in 0.2.0 apply uniformly
+across all `runner.py` paths.
+
+### Added
+
+- `runner._run_trial` now computes per-step codebook-oracle SNR for
+  **single-BS** experiments by collecting the `(n_steps, N_UE, N_BS)` channel
+  matrix stack and delegating to `metrics.oracle_snr_db` once per trial
+  (vectorised, one einsum call).
+- `runner.run_experiment` allocates `snr_oracle_agg` unconditionally (was
+  gated on `multi_bs`); the result dict now carries `snr_oracle` with shape
+  `(n_trials, n_steps)` for both experiment topologies.
+- `TrialResult.snr_oracle` is now populated for both single-BS and multi-BS
+  runs; the docstring comment updated accordingly.
+- Three new tests in `tests/test_runner.py`:
+  - `test_single_bs_oracle_populated` — shape and finite-value guard.
+  - `test_oracle_dominates_achieved_single_bs` — Perfect algorithm oracle ≥
+    achieved up to floating-point floor (1 × 10⁻³ dB).
+  - `test_oracle_matches_metrics_function` — cross-checks the runner value
+    against an independent call to `metrics.oracle_snr_db` on the same
+    channel sequence.
+
+### Changed
+
+- `runner.py`: import `beamsim.metrics.oracle_snr_db` directly (no circular
+  dependency — `metrics.py` has no beamsim internal imports by design).
+- Multi-BS inline oracle computation unchanged; pre-conjugated `_W` matrix
+  now derived from the shared `_UE_W` to avoid redundant transposes.
+
 ## [0.2.0] — 2026-05-09
 
 Public-API addition release: four codebook-oracle / regret / outage /
@@ -123,6 +155,7 @@ extended with SOTA baselines for the journal-paper reformulation.
 - Cosine-spaced ULA codebook, mobility tracks (rotation / straight line).
 - Simplified TR 38.901 GSCM, BPLM bookkeeping, six initial MBP policies.
 
-[Unreleased]: https://github.com/Marimuda/beamsim/compare/v0.2.0...HEAD
+[Unreleased]: https://github.com/Marimuda/beamsim/compare/v0.2.1...HEAD
+[0.2.1]: https://github.com/Marimuda/beamsim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.1.0
