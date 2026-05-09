@@ -1,0 +1,15 @@
+defaults:
+  - /scenario: case_d_4bs_no_reflectors
+  - /sweep: none
+  - /algo: all
+  - _self_
+
+name: handover_no_reflectors
+
+run:
+  algorithms: ${algo.algorithms}
+  n_trials: 30
+  n_steps: ${scenario.n_steps}
+  seed: 44444
+  n_workers: null
+  output_path: results

@@ -1,0 +1,4 @@
+# Rotational-velocity sweep matching predecessor Fig 5.24 and Fig 6.2 x-axis.
+variable: rpm
+sweep_values: [5, 10, 20, 40, 60, 80, 120, 180]
+target_snr_db: null

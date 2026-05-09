@@ -1,0 +1,13 @@
+# Case A: 3GPP UMi, 10 m/s, SNR-sweep geometry (predecessor Fig 6.4 caption).
+# BS at origin; UE path at y=150 m, 10 m/s.
+case: case_a
+ue_speed_mps: 10.0
+ue_track_kind: straight_line
+bs_positions:
+  - [0.0, 0.0]
+bs_yaws:
+  - 0.0
+dt: 0.001
+n_steps: 1000
+channel_kind: geometric_umi
+channel_options: {}

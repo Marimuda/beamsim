@@ -1,0 +1,15 @@
+defaults:
+  - /scenario: case_a_umi_10mps
+  - /sweep: snr_db
+  - /algo: all
+  - _self_
+
+name: snr
+
+run:
+  algorithms: ${algo.algorithms}
+  n_trials: 30
+  n_steps: 1000
+  seed: 33333
+  n_workers: null
+  output_path: results

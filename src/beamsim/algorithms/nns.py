@@ -35,8 +35,7 @@ from beamsim.algorithms.base import Algorithm
 from beamsim.bplm import BPLMState
 
 _4CONNECTED = [(0, 1), (0, -1), (1, 0), (-1, 0)]
-_8CONNECTED = [(dk, dl) for dk in (-1, 0, 1) for dl in (-1, 0, 1)
-               if (dk, dl) != (0, 0)]
+_8CONNECTED = [(dk, dl) for dk in (-1, 0, 1) for dl in (-1, 0, 1) if (dk, dl) != (0, 0)]
 
 
 class NNS(Algorithm):
@@ -96,8 +95,7 @@ class NNS(Algorithm):
         # (or unchanged) centre and start a fresh cycle.
         if not self._stack:
             centre_mag = float(np.abs(state.observations[self._kb, self._lb]))
-            if (self._cycle_best_kl is not None
-                    and self._cycle_best_mag > centre_mag):
+            if self._cycle_best_kl is not None and self._cycle_best_mag > centre_mag:
                 self._kb, self._lb = self._cycle_best_kl
             self._cycle_best_mag = -np.inf
             self._cycle_best_kl = None
@@ -108,7 +106,7 @@ class NNS(Algorithm):
             self._last_kl = choice
             return choice
 
-        choice = self._stack.pop()    # LIFO: pop from top of P
+        choice = self._stack.pop()  # LIFO: pop from top of P
         self._last_kl = choice
         return choice
 

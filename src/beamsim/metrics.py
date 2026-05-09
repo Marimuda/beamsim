@@ -7,8 +7,11 @@ self-contained so it can be tested and reused independently of the runner.
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 from numpy.typing import NDArray
+from scipy.stats import bootstrap as _scipy_bootstrap
 
 
 def output_snr_db(
@@ -29,7 +32,7 @@ def output_snr_db(
     -------
     SNR in dB, same shape as *trace_complex_y*.
     """
-    sigma_sq = noise_amplitude ** 2
+    sigma_sq = noise_amplitude**2
     snr_lin = (np.abs(trace_complex_y) ** 2) / sigma_sq
     # Clip to avoid log(0); anything below -100 dB is below noise floor.
     return 10.0 * np.log10(np.maximum(snr_lin, 1e-10))
@@ -94,8 +97,9 @@ def bs_selection_loss(
     # Convert selected_bs values to positions in bs_indices list.
     idx_map = {b: i for i, b in enumerate(bs_indices)}
     sel_pos = np.vectorize(idx_map.__getitem__)(selected_bs)  # (n_trials, n_steps)
-    sel_snr_db = stacked[sel_pos, np.arange(sel_pos.shape[0])[:, None],
-                          np.arange(sel_pos.shape[1])[None, :]]
+    sel_snr_db = stacked[
+        sel_pos, np.arange(sel_pos.shape[0])[:, None], np.arange(sel_pos.shape[1])[None, :]
+    ]
 
     loss_db = best_snr_db - sel_snr_db  # always >= 0 (dB difference)
     return float(np.mean(loss_db))
@@ -129,11 +133,22 @@ def bootstrap_ci(
     """
     if rng is None:
         rng = np.random.default_rng()
-    n = len(samples)
-    boot_means = np.empty(n_boot, dtype=np.float64)
-    for i in range(n_boot):
-        resample = samples[rng.integers(0, n, size=n)]
-        boot_means[i] = resample.mean()
-    lo = float(np.percentile(boot_means, 100 * alpha / 2))
-    hi = float(np.percentile(boot_means, 100 * (1 - alpha / 2)))
-    return float(samples.mean()), lo, hi
+    mean = float(samples.mean())
+    try:
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            res = _scipy_bootstrap(
+                (samples,),
+                statistic=np.mean,
+                n_resamples=n_boot,
+                confidence_level=1.0 - alpha,
+                method="BCa",
+                random_state=rng,
+            )
+        lo = float(res.confidence_interval.low)
+        hi = float(res.confidence_interval.high)
+        if not (np.isfinite(lo) and np.isfinite(hi)):
+            raise ValueError("BCa degenerate")
+    except Exception:
+        lo = hi = mean
+    return mean, lo, hi

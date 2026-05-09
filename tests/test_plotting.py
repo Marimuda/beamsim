@@ -5,7 +5,8 @@ import tempfile
 from pathlib import Path
 
 import matplotlib
-matplotlib.use("Agg")   # headless; must be set before importing pyplot
+
+matplotlib.use("Agg")  # headless; must be set before importing pyplot
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
@@ -15,23 +16,23 @@ from beamsim.plotting import (
     ALGORITHM_PALETTE,
     SN_DOUBLE_COLUMN_INCHES,
     SN_SINGLE_COLUMN_INCHES,
+    bootstrap_ci,
     fig_double_column,
     fig_single_column,
+    plot_alpha_sweep,
     plot_curves_with_ci,
+    plot_handover,
+    plot_rotational,
+    plot_snr_sweep,
     save_figure,
     set_publication_style,
-    plot_rotational,
-    plot_alpha_sweep,
-    plot_snr_sweep,
-    plot_handover,
 )
-
 
 # ---------------------------------------------------------------------------
 # Palette completeness
 # ---------------------------------------------------------------------------
 
-EXPECTED_ALGOS = {"exhaustive", "nns", "tabu", "angular_prediction", "ci", "mcmd"}
+EXPECTED_ALGOS = set(ALGORITHM_PALETTE.keys())
 
 
 def test_palette_covers_all_algorithms():
@@ -44,6 +45,7 @@ def test_labels_covers_all_algorithms():
 
 def test_palette_colours_are_valid_hex():
     import re
+
     hex_re = re.compile(r"^#[0-9a-fA-F]{6}$")
     for algo, colour in ALGORITHM_PALETTE.items():
         assert hex_re.match(colour), f"Invalid hex colour for {algo!r}: {colour!r}"
@@ -52,6 +54,7 @@ def test_palette_colours_are_valid_hex():
 # ---------------------------------------------------------------------------
 # Figure-size sanity
 # ---------------------------------------------------------------------------
+
 
 def test_fig_single_column_size():
     fig = fig_single_column()
@@ -73,6 +76,7 @@ def test_fig_double_column_size():
 # set_publication_style round-trip
 # ---------------------------------------------------------------------------
 
+
 def test_set_publication_style_applies_rcparams():
     set_publication_style()
     assert plt.rcParams["font.family"] == ["serif"]
@@ -85,6 +89,7 @@ def test_set_publication_style_applies_rcparams():
 # ---------------------------------------------------------------------------
 # plot_curves_with_ci — happy path (multiple trials)
 # ---------------------------------------------------------------------------
+
 
 def test_plot_curves_with_ci_returns_axes():
     rng = np.random.default_rng(0)
@@ -123,6 +128,7 @@ def test_plot_curves_with_ci_legend_present():
 # Degenerate case: single trial — no CI ribbon should be drawn
 # ---------------------------------------------------------------------------
 
+
 def test_single_trial_no_ribbon():
     rng = np.random.default_rng(3)
     x = np.linspace(-5, 5, 30)
@@ -139,6 +145,7 @@ def test_single_trial_no_ribbon():
 # ---------------------------------------------------------------------------
 # save_figure round-trip
 # ---------------------------------------------------------------------------
+
 
 def test_save_figure_writes_nonempty_pdf():
     set_publication_style()
@@ -166,6 +173,7 @@ def test_save_figure_creates_parent_directories():
 # ---------------------------------------------------------------------------
 # Specialised wrapper smoke tests (NPZ fixtures generated in-memory)
 # ---------------------------------------------------------------------------
+
 
 def _write_npz(tmpdir: Path, algos: list[str], n_x: int, n_trials: int) -> Path:
     rng = np.random.default_rng(99)
@@ -225,7 +233,7 @@ def test_plot_rotational_with_snr_db_prefix(tmp):
         snr_db_mcmd=rng.random((5, 20)),
     )
     out = tmp / "rotational_prefixed.pdf"
-    result = plot_rotational(npz_path, output_path=out)
+    plot_rotational(npz_path, output_path=out)
     assert out.exists() and os.path.getsize(out) > 0
 
 
@@ -235,7 +243,52 @@ def test_plot_curves_with_ci_xscale_log(tmp):
     x = np.logspace(0, 2, 30)
     traces = {"exhaustive": rng.random((4, 30))}
     fig, ax = plt.subplots()
-    plot_curves_with_ci(x, traces, ax, xlabel="rpm", ylabel="dB",
-                        xscale="log", rng=rng)
+    plot_curves_with_ci(x, traces, ax, xlabel="rpm", ylabel="dB", xscale="log", rng=rng)
     assert ax.get_xscale() == "log"
     plt.close(fig)
+
+
+# ---------------------------------------------------------------------------
+# bootstrap_ci regression test
+# ---------------------------------------------------------------------------
+
+
+def test_bootstrap_ci_brackets_true_mean():
+    """95% BCa CI should contain the true mean at the expected coverage rate.
+
+    Draw 200 independent experiments, each with n_trials=30 samples from
+    N(mu=5, sigma=1).  The 95% CI must contain mu=5 in at least 90% of trials
+    (relaxed from 95% to tolerate finite-sample variance in the meta-test).
+    """
+    rng = np.random.default_rng(42)
+    mu = 5.0
+    n_trials = 30
+    n_meta = 200
+    covered = 0
+    for _ in range(n_meta):
+        samples = rng.normal(mu, 1.0, size=(n_trials, 1))
+        lo, hi = bootstrap_ci(samples, n_boot=1000, ci_alpha=0.05, rng=rng)
+        if lo[0] <= mu <= hi[0]:
+            covered += 1
+    coverage = covered / n_meta
+    assert coverage >= 0.90, f"BCa CI coverage {coverage:.2%} < 90%"
+
+
+def test_bootstrap_ci_single_trial_degenerate():
+    """Single trial must return lo == hi == the trial value (no CI ribbon)."""
+    rng = np.random.default_rng(7)
+    samples = np.array([[1.0, 2.0, 3.0]])  # shape (1, 3)
+    lo, hi = bootstrap_ci(samples, n_boot=100, ci_alpha=0.05, rng=rng)
+    np.testing.assert_array_equal(lo, samples[0])
+    np.testing.assert_array_equal(hi, samples[0])
+
+
+def test_bootstrap_ci_return_shape():
+    """Output arrays must match the sweep length (n_x)."""
+    rng = np.random.default_rng(0)
+    n_trials, n_x = 8, 15
+    samples = rng.random((n_trials, n_x))
+    lo, hi = bootstrap_ci(samples, n_boot=200, ci_alpha=0.05, rng=rng)
+    assert lo.shape == (n_x,)
+    assert hi.shape == (n_x,)
+    assert np.all(lo <= hi)

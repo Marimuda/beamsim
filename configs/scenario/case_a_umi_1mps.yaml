@@ -1,0 +1,13 @@
+# Case A: 3GPP UMi, 1 m/s, alpha-sweep geometry (predecessor Section 5.2.2).
+# BS at origin; UE path at y=150 m (3/4 IBS = 150 m lateral offset).
+case: case_a
+ue_speed_mps: 1.0
+ue_track_kind: straight_line
+bs_positions:
+  - [0.0, 0.0]
+bs_yaws:
+  - 0.0
+dt: 0.001
+n_steps: 1000
+channel_kind: geometric_umi
+channel_options: {}

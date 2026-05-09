@@ -1,0 +1,18 @@
+defaults:
+  - /scenario: case_c_freespace_rotation
+  - /sweep: rotational_rpm
+  - _self_
+
+name: bs_coordination
+
+run:
+  algorithms:
+    - exhaustive
+    - nns
+    - perfect
+    - nns_bs_sequential
+  n_trials: 10
+  n_steps: ${scenario.n_steps}
+  seed: 99000
+  n_workers: null
+  output_path: results

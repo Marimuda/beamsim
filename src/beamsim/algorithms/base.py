@@ -17,5 +17,4 @@ class Algorithm(ABC):
         pass
 
     @abstractmethod
-    def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:
-        ...
+    def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]: ...

@@ -12,7 +12,7 @@ class Exhaustive(Algorithm):
     def reset(self, state: BPLMState, context: dict) -> None:
         self._index = 0
 
-    def select_next_mbp(self, state, m, context):
+    def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:
         K, L = state.K, state.L
         idx = self._index % (K * L)
         self._index += 1

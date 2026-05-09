@@ -21,7 +21,7 @@ class ContextInformation(Algorithm):
     def reset(self, state: BPLMState, context: dict) -> None:
         pass
 
-    def select_next_mbp(self, state, m, context):
+    def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:
         ue_pose = context["ue_pose_at"](m)
         ue_xy, ue_yaw = ue_pose[0], ue_pose[1]
         bs_xy = context["bs_xy"]
@@ -42,5 +42,5 @@ class ContextInformation(Algorithm):
         return k, l
 
 
-def _wrap_pi(a):
-    return (a + np.pi) % (2 * np.pi) - np.pi
+def _wrap_pi(a: float) -> float:
+    return float((a + np.pi) % (2 * np.pi) - np.pi)

@@ -42,10 +42,9 @@ from numpy.typing import NDArray
 from beamsim.algorithms.base import Algorithm
 from beamsim.bplm import BPLMState
 
-
 # Weight vectors from Fig. 5.26 — order is (age, tabu, NNS)
-W_LOW = np.array([0.43, 0.52, 0.05])    # (age, tabu, NNS) at 3 m/s
-W_HIGH = np.array([0.16, 0.36, 0.49])   # (age, tabu, NNS) at 10 m/s
+W_LOW = np.array([0.43, 0.52, 0.05])  # (age, tabu, NNS) at 3 m/s
+W_HIGH = np.array([0.16, 0.36, 0.49])  # (age, tabu, NNS) at 10 m/s
 
 _4CONNECTED = [(0, 1), (0, -1), (1, 0), (-1, 0)]
 
@@ -74,14 +73,16 @@ class MCMD(Algorithm):
 
     name = "mcmd"
 
-    def __init__(self,
-                 q: int = 10,
-                 c_v: float = 30.0,    # tuned so v saturates in fast rotation (Sec 5.5)
-                 c_b: float = 1.5,     # tuned so BQ saturates with healthy OBP magnitudes
-                 nns_radius: int = 2,
-                 tabu_tenure: int = 20,
-                 w_low: NDArray[np.float64] = W_LOW,
-                 w_high: NDArray[np.float64] = W_HIGH):
+    def __init__(
+        self,
+        q: int = 10,
+        c_v: float = 30.0,  # tuned so v saturates in fast rotation (Sec 5.5)
+        c_b: float = 1.5,  # tuned so BQ saturates with healthy OBP magnitudes
+        nns_radius: int = 2,
+        tabu_tenure: int = 20,
+        w_low: NDArray[np.float64] = W_LOW,
+        w_high: NDArray[np.float64] = W_HIGH,
+    ):
         self.q = q
         self.c_v = c_v
         self.c_b = c_b

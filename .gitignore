@@ -10,5 +10,10 @@ results/*.npz
 results/*.pdf
 results/*.log
 results/*.txt
+results/**/*.npz
+results/**/*.pdf
+results/**/*.log
+results/**/*.txt
 !results/.gitkeep
+outputs/
 .DS_Store

@@ -43,7 +43,9 @@ class Codebook:
     @property
     def matrix(self) -> NDArray[np.complex128]:
         """Returns an (n_elements, n_beams) matrix whose columns are codewords."""
-        return np.column_stack([steering_vector(self.n_elements, t, self.spacing) for t in self.theta])
+        return np.column_stack(
+            [steering_vector(self.n_elements, t, self.spacing) for t in self.theta]
+        )
 
     def codeword(self, k: int) -> NDArray[np.complex128]:
         return steering_vector(self.n_elements, self.theta[k], self.spacing)

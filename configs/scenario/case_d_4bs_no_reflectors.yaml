@@ -1,0 +1,19 @@
+# Case D variant: no NLOS clusters (predecessor "without reflectors" Fig 6.9).
+case: case_d
+ue_speed_mps: 10.0
+ue_track_kind: straight_line
+bs_positions:
+  - [0.0, 0.0]
+  - [200.0, 0.0]
+  - [100.0, 173.20508075688772]
+  - [100.0, -173.20508075688772]
+bs_yaws:
+  - 0.0
+  - 0.0
+  - 0.0
+  - 0.0
+dt: 0.001
+n_steps: 50000
+channel_kind: geometric_umi
+channel_options:
+  disable_clusters: true

@@ -61,13 +61,15 @@ class Tabu(Algorithm):
 
     name = "tabu"
 
-    def __init__(self,
-                 tenure: int = 20,
-                 radius: int = 1,          # kept for API compatibility; report uses 4-conn
-                 age_weight: float = 0.5,
-                 diversification_period: int = 50):
+    def __init__(
+        self,
+        tenure: int = 20,
+        radius: int = 1,  # kept for API compatibility; report uses 4-conn
+        age_weight: float = 0.5,
+        diversification_period: int = 50,
+    ):
         self.tenure = tenure
-        self.radius = radius               # ignored internally — always 4-connected
+        self.radius = radius  # ignored internally — always 4-connected
         self.age_weight = float(age_weight)
         self.diversification_period = diversification_period
 
@@ -162,8 +164,7 @@ class Tabu(Algorithm):
             k, l = self._closest_non_tabu(self._kb, self._lb, K, L)
 
         # --- Diversification extension (Glover 1989) ---
-        if (self.diversification_period > 0
-                and self._call_count % self.diversification_period == 0):
+        if self.diversification_period > 0 and self._call_count % self.diversification_period == 0:
             rng = np.random.default_rng()
             free = list(zip(*np.where(self._T >= 0)))
             if free:

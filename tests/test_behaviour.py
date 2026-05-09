@@ -20,11 +20,15 @@ import numpy as np
 import pytest
 
 from beamsim.algorithms import (
-    NNS, Tabu, Exhaustive, ContextInformation, MCMD, AngularPrediction,
+    MCMD,
+    NNS,
+    ContextInformation,
+    Exhaustive,
+    Tabu,
 )
 from beamsim.bplm import BPLMState
-from beamsim.codebook import make_default_ue_codebook, make_default_bs_codebook
 from beamsim.channel import FreeSpaceLosChannel
+from beamsim.codebook import make_default_bs_codebook, make_default_ue_codebook
 from beamsim.geometry import rotation_track
 
 
@@ -36,16 +40,16 @@ def _run_rotation(algo, *, rpm: float, n_steps: int, seed: int = 0):
     ue_cb = make_default_ue_codebook()
     bs_cb = make_default_bs_codebook()
     bs_xy = np.array([10.0, 0.0])
-    track = rotation_track((0.0, 0.0), rpm=rpm, n_steps=n_steps, dt=1e-3,
-                            initial_orientation=0.0)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    track = rotation_track((0.0, 0.0), rpm=rpm, n_steps=n_steps, dt=1e-3, initial_orientation=0.0)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     state = BPLMState(ue_codebook=ue_cb, bs_codebook=bs_cb, noise_amplitude=1e-3)
     state.tx_amp = 1.0
-    ctx = {"ue_pose_at": lambda m: (track.positions[m], float(track.orientations[m])),
-           "bs_xy": bs_xy, "bs_yaw": 0.0}
+    ctx = {
+        "ue_pose_at": lambda m: (track.positions[m], float(track.orientations[m])),
+        "bs_xy": bs_xy,
+        "bs_yaw": 0.0,
+    }
     algo.reset(state, ctx)
-    rng = np.random.default_rng(seed)
     snr_db = np.empty(n_steps)
     for m in range(n_steps):
         ue_xy = track.positions[m]
@@ -57,7 +61,7 @@ def _run_rotation(algo, *, rpm: float, n_steps: int, seed: int = 0):
         w = ue_cb.codeword(ok)
         f = bs_cb.codeword(ol)
         gain_sq = abs(w.conj() @ H @ f) ** 2
-        snr_lin = max(gain_sq * state.tx_amp ** 2 / state.noise_amplitude ** 2, 1e-12)
+        snr_lin = max(gain_sq * state.tx_amp**2 / state.noise_amplitude**2, 1e-12)
         snr_db[m] = 10 * np.log10(snr_lin)
     return snr_db, state
 
@@ -66,13 +70,17 @@ def _run_rotation(algo, *, rpm: float, n_steps: int, seed: int = 0):
 # Sanity-floor: every algorithm should achieve high SNR at near-zero rotation
 # ---------------------------------------------------------------------------
 
-@pytest.mark.parametrize("name,cls", [
-    ("Exhaustive", Exhaustive),
-    ("NNS", NNS),
-    ("Tabu", Tabu),
-    ("CI", ContextInformation),
-    ("MCMD", MCMD),
-])
+
+@pytest.mark.parametrize(
+    "name,cls",
+    [
+        ("Exhaustive", Exhaustive),
+        ("NNS", NNS),
+        ("Tabu", Tabu),
+        ("CI", ContextInformation),
+        ("MCMD", MCMD),
+    ],
+)
 def test_low_rpm_steady_state_above_45dB(name, cls):
     """At 5 rpm the LOS direction barely moves. After 2000 occasions, every
     measurement-based and geometry-based algorithm should achieve mean SNR
@@ -87,6 +95,7 @@ def test_low_rpm_steady_state_above_45dB(name, cls):
 # MCMD: w_t saturation in high-volatility rotation
 # ---------------------------------------------------------------------------
 
+
 def test_mcmd_w_t_lifts_with_rpm():
     """Predecessor Sec. 6.2 acknowledges the volatility measure is
     "suboptimal" (Sec 5.5: "v(m) saturates ... thus making this measure
@@ -94,11 +103,13 @@ def test_mcmd_w_t_lifts_with_rpm():
     measurably higher in fast rotation than in slow rotation. Pin down:
     the ratio w_t(180)/w_t(5) should be at least 1.15.
     """
+
     def end_state(rpm):
         m = MCMD()
         _, _ = _run_rotation(m, rpm=rpm, n_steps=2000, seed=2)
         bq, v = m._beam_quality(), m._volatility()
         return float(np.clip(bq * (bq + v) / 2.0, 0.0, 1.0)), bq, v
+
     w_lo, bq_lo, v_lo = end_state(5)
     w_hi, bq_hi, v_hi = end_state(180)
     assert w_hi > w_lo * 1.15, (
@@ -136,14 +147,13 @@ def test_mcmd_at_5rpm_close_to_exhaustive():
     mcmd_late = mcmd_snr[-1000:].mean()
     exh_late = exh_snr[-1000:].mean()
     gap = abs(mcmd_late - exh_late)
-    assert gap < 3.0, (
-        f"MCMD={mcmd_late:.1f}, Exh={exh_late:.1f}, |gap|={gap:.1f} dB at 5 rpm"
-    )
+    assert gap < 3.0, f"MCMD={mcmd_late:.1f}, Exh={exh_late:.1f}, |gap|={gap:.1f} dB at 5 rpm"
 
 
 # ---------------------------------------------------------------------------
 # Tabu vs NNS: Tabu should overtake NNS at very high rpm (>110 rpm per Sec 6.2)
 # ---------------------------------------------------------------------------
+
 
 def test_tabu_and_nns_both_track_above_50dB_at_120rpm():
     """Predecessor Sec 6.2 puts the NNS/Tabu crossover at ~110 rpm but
@@ -167,6 +177,7 @@ def test_tabu_and_nns_both_track_above_50dB_at_120rpm():
 # Exhaustive degradation rate: ~2 dB per decade per Sec 6.2
 # ---------------------------------------------------------------------------
 
+
 def test_exhaustive_degradation_monotone():
     """Predecessor Sec 6.2: 'exhaustive deteriorates about 2 dB per decade'.
     With our argmax OBP rule on a stale BPLM the absolute drop is steeper
@@ -181,14 +192,13 @@ def test_exhaustive_degradation_monotone():
     assert mean_10 > mean_100, (
         f"Expected SNR@10={mean_10:.1f} > SNR@100={mean_100:.1f} dB (monotone)"
     )
-    assert mean_100 > 35.0, (
-        f"Exh@100={mean_100:.1f} dB — too low (likely an alignment bug)"
-    )
+    assert mean_100 > 35.0, f"Exh@100={mean_100:.1f} dB — too low (likely an alignment bug)"
 
 
 # ---------------------------------------------------------------------------
 # CI: should be rotation-invariant within 2 dB across the full rpm range
 # ---------------------------------------------------------------------------
+
 
 def test_ci_rotation_invariant():
     """CI uses geometry only; output SNR depends on codebook scalloping,

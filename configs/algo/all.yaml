@@ -1,0 +1,9 @@
+# All 7 beam-alignment algorithms.
+algorithms:
+  - exhaustive
+  - nns
+  - tabu
+  - angular_prediction
+  - ci
+  - mcmd
+  - perfect

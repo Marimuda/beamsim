@@ -1,0 +1,4 @@
+# No sweep — single-point experiment (e.g. handover at fixed SNR).
+variable: none
+sweep_values: []
+target_snr_db: 10.0

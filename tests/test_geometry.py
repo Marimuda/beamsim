@@ -11,8 +11,7 @@ from beamsim.geometry import (
 
 
 def test_straight_line_track_distance():
-    track = straight_line_track((0.0, 0.0), heading=0.0, speed_mps=1.0,
-                                 n_steps=1001, dt=1e-3)
+    track = straight_line_track((0.0, 0.0), heading=0.0, speed_mps=1.0, n_steps=1001, dt=1e-3)
     travelled = np.linalg.norm(track.positions[-1] - track.positions[0])
     np.testing.assert_allclose(travelled, 1.0, atol=1e-9)
     assert track.n_steps == 1001
@@ -21,7 +20,9 @@ def test_straight_line_track_distance():
 def test_rotation_track_orientation():
     track = rotation_track((10.0, 0.0), rpm=60.0, n_steps=1001, dt=1e-3)
     # 60 rpm = 1 Hz = 2*pi rad/s. After 1 second we should be back to start.
-    np.testing.assert_allclose(np.cos(track.orientations[-1]), np.cos(track.orientations[0]), atol=1e-9)
+    np.testing.assert_allclose(
+        np.cos(track.orientations[-1]), np.cos(track.orientations[0]), atol=1e-9
+    )
 
 
 def test_relative_aoa_aod_round_trip():

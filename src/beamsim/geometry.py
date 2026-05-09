@@ -18,21 +18,23 @@ class Track:
     track is sufficient.
     """
 
-    positions: NDArray[np.float64]   # (n_steps, 2)
+    positions: NDArray[np.float64]  # (n_steps, 2)
     orientations: NDArray[np.float64]  # (n_steps,)
-    dt: float                           # seconds per measurement occasion
+    dt: float  # seconds per measurement occasion
 
     @property
     def n_steps(self) -> int:
         return self.positions.shape[0]
 
 
-def straight_line_track(start_xy: tuple[float, float],
-                         heading: float,
-                         speed_mps: float,
-                         n_steps: int,
-                         dt: float,
-                         orientation: float | None = None) -> Track:
+def straight_line_track(
+    start_xy: tuple[float, float],
+    heading: float,
+    speed_mps: float,
+    n_steps: int,
+    dt: float,
+    orientation: float | None = None,
+) -> Track:
     """Constant-velocity straight-line track at ``speed_mps`` m/s.
 
     ``heading`` is the direction of motion in radians. If ``orientation``
@@ -45,31 +47,31 @@ def straight_line_track(start_xy: tuple[float, float],
     return Track(positions=positions, orientations=yaw, dt=dt)
 
 
-def rotation_track(position_xy: tuple[float, float],
-                    rpm: float,
-                    n_steps: int,
-                    dt: float,
-                    initial_orientation: float = 0.0) -> Track:
+def rotation_track(
+    position_xy: tuple[float, float],
+    rpm: float,
+    n_steps: int,
+    dt: float,
+    initial_orientation: float = 0.0,
+) -> Track:
     """Stationary UE rotating about its own axis at ``rpm`` revolutions/min."""
     t = np.arange(n_steps) * dt
     omega = rpm * 2 * np.pi / 60.0  # rad/s
-    yaw = initial_orientation + omega * t
+    yaw: NDArray[np.float64] = (initial_orientation + omega * t).astype(np.float64)
     positions = np.tile(np.array(position_xy), (n_steps, 1))
     return Track(positions=positions, orientations=yaw, dt=dt)
 
 
-def relative_aoa(ue_xy: NDArray[np.float64],
-                  ue_yaw: float,
-                  source_xy: NDArray[np.float64]) -> float:
+def relative_aoa(
+    ue_xy: NDArray[np.float64], ue_yaw: float, source_xy: NDArray[np.float64]
+) -> float:
     """AoA at the UE for a source at ``source_xy``, expressed in the UE body frame."""
     delta = np.asarray(source_xy) - np.asarray(ue_xy)
     world_aoa = np.arctan2(delta[1], delta[0])
     return _wrap_pi(world_aoa - ue_yaw)
 
 
-def relative_aod(bs_xy: NDArray[np.float64],
-                  bs_yaw: float,
-                  ue_xy: NDArray[np.float64]) -> float:
+def relative_aod(bs_xy: NDArray[np.float64], bs_yaw: float, ue_xy: NDArray[np.float64]) -> float:
     """AoD at the BS toward the UE, in the BS body frame."""
     delta = np.asarray(ue_xy) - np.asarray(bs_xy)
     world = np.arctan2(delta[1], delta[0])

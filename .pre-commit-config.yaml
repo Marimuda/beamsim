@@ -1,0 +1,30 @@
+repos:
+  # Ruff: fast lint + format (replaces isort, pyupgrade, flake8)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.5.0
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # mypy: type checking (local so it uses the project's installed stubs)
+  - repo: local
+    hooks:
+      - id: mypy
+        name: mypy
+        entry: mypy
+        language: system
+        types: [python]
+        args: [src/beamsim/]
+        pass_filenames: false
+
+  # pytest fast subset: skip slow/MC tests
+  - repo: local
+    hooks:
+      - id: pytest-fast
+        name: pytest (fast subset)
+        entry: pytest
+        language: system
+        args: [tests/, -q, -m, "not slow", --no-header, -x]
+        pass_filenames: false
+        stages: [pre-push]

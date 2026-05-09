@@ -1,0 +1,15 @@
+defaults:
+  - /scenario: case_a_umi_1mps
+  - /sweep: alpha
+  - /algo: all
+  - _self_
+
+name: alpha
+
+run:
+  algorithms: ${algo.algorithms}
+  n_trials: 30
+  n_steps: 1000
+  seed: 22222
+  n_workers: null
+  output_path: results

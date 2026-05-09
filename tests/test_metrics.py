@@ -13,10 +13,10 @@ from beamsim.metrics import (
     output_snr_db,
 )
 
-
 # ---------------------------------------------------------------------------
 # output_snr_db
 # ---------------------------------------------------------------------------
+
 
 def test_output_snr_db_known_value():
     """Signal amplitude = 1, noise amplitude = 1 → SNR = 0 dB."""
@@ -44,9 +44,10 @@ def test_output_snr_db_zero_signal():
 # coverage_rate — known synthetic trace
 # ---------------------------------------------------------------------------
 
+
 def test_coverage_rate_all_above():
     """All steps above threshold → rate = 1 for each trial."""
-    snr = np.full((4, 10), 20.0)   # (n_trials, n_steps)
+    snr = np.full((4, 10), 20.0)  # (n_trials, n_steps)
     rate = coverage_rate(snr, gamma_th_db=10.0)
     np.testing.assert_array_equal(rate, np.ones(4))
 
@@ -59,8 +60,8 @@ def test_coverage_rate_all_below():
 
 def test_coverage_rate_known_fraction():
     """5 out of 10 steps above threshold → rate = 0.5."""
-    row = np.array([15.0] * 5 + [5.0] * 5)      # 5 above, 5 below
-    snr = np.tile(row, (3, 1))                   # 3 identical trials
+    row = np.array([15.0] * 5 + [5.0] * 5)  # 5 above, 5 below
+    snr = np.tile(row, (3, 1))  # 3 identical trials
     rate = coverage_rate(snr, gamma_th_db=10.0)
     np.testing.assert_allclose(rate, [0.5, 0.5, 0.5], atol=1e-12)
 
@@ -75,7 +76,7 @@ def test_coverage_rate_monotone_in_threshold():
     for i in range(len(rates) - 1):
         assert rates[i] >= rates[i + 1] - 1e-12, (
             f"Coverage rate increased from {rates[i]:.4f} at "
-            f"{thresholds[i]:.1f} dB to {rates[i+1]:.4f} at {thresholds[i+1]:.1f} dB"
+            f"{thresholds[i]:.1f} dB to {rates[i + 1]:.4f} at {thresholds[i + 1]:.1f} dB"
         )
 
 
@@ -83,13 +84,14 @@ def test_coverage_rate_monotone_in_threshold():
 # bs_selection_loss
 # ---------------------------------------------------------------------------
 
+
 def test_bs_selection_loss_zero_when_best_selected():
     """If selected BS always equals best BS, L_BS = 0."""
     rng = np.random.default_rng(1)
     snr0 = rng.uniform(5, 15, (10, 20))
-    snr1 = rng.uniform(-5, 5, (10, 20))   # always lower than BS 0
+    snr1 = rng.uniform(-5, 5, (10, 20))  # always lower than BS 0
     per_bs = {0: snr0, 1: snr1}
-    selected = np.zeros((10, 20), dtype=int)   # always pick BS 0 (the best)
+    selected = np.zeros((10, 20), dtype=int)  # always pick BS 0 (the best)
     loss = bs_selection_loss(per_bs, selected)
     assert loss == pytest.approx(0.0, abs=1e-9)
 
@@ -97,7 +99,7 @@ def test_bs_selection_loss_zero_when_best_selected():
 def test_bs_selection_loss_positive_when_suboptimal():
     """If selected BS is never the best, L_BS > 0."""
     snr0 = np.full((5, 10), 10.0)  # BS 0 is always 10 dB
-    snr1 = np.full((5, 10), 0.0)   # BS 1 is always 0 dB
+    snr1 = np.full((5, 10), 0.0)  # BS 1 is always 0 dB
     per_bs = {0: snr0, 1: snr1}
     selected = np.ones((5, 10), dtype=int)  # always pick BS 1 (suboptimal)
     loss = bs_selection_loss(per_bs, selected)
@@ -119,6 +121,7 @@ def test_bs_selection_loss_non_negative():
 # mean_snr_db
 # ---------------------------------------------------------------------------
 
+
 def test_mean_snr_db_constant():
     snr = np.full((5, 20), 7.0)
     assert mean_snr_db(snr) == pytest.approx(7.0)
@@ -127,6 +130,7 @@ def test_mean_snr_db_constant():
 # ---------------------------------------------------------------------------
 # bootstrap_ci
 # ---------------------------------------------------------------------------
+
 
 def test_bootstrap_ci_brackets_true_mean():
     """For i.i.d. N(mu, 1) with large n, the 95 % CI should bracket mu."""

@@ -59,10 +59,15 @@ class AngularPrediction(Algorithm):
 
     name = "angular_prediction"
 
-    def __init__(self, warmup: int = 2, history_len: int = 3,
-                 # legacy Kalman params accepted and ignored for API compat
-                 q_angle: float = 1e-3, q_rate: float = 1e-2,
-                 sigma_obs_factor: float = 1.0):
+    def __init__(
+        self,
+        warmup: int = 2,
+        history_len: int = 3,
+        # legacy Kalman params accepted and ignored for API compat
+        q_angle: float = 1e-3,
+        q_rate: float = 1e-2,
+        sigma_obs_factor: float = 1.0,
+    ):
         self.warmup = max(warmup, 2)
         self.history_len = max(history_len, 1)
 
@@ -73,9 +78,7 @@ class AngularPrediction(Algorithm):
     def reset(self, state: BPLMState, context: dict) -> None:
         # h_history stores the last (history_len + 1) OBP angle vectors
         # so we can compute history_len gradient steps.
-        self._h_history: deque[NDArray[np.float64]] = deque(
-            maxlen=self.history_len + 1
-        )
+        self._h_history: deque[NDArray[np.float64]] = deque(maxlen=self.history_len + 1)
         self._obp_count: int = 0
         self._sweep_idx: int = 0
 
@@ -83,13 +86,11 @@ class AngularPrediction(Algorithm):
         # Algorithm 3 line 1: h(m) <- a(k_hat, l_hat)
         if np.any(state.measured_at >= 0):
             ok, ol = state.obp()
-            h_current = np.array([
-                float(state.ue_codebook.theta[ok]),
-                float(state.bs_codebook.theta[ol])
-            ])
+            h_current = np.array(
+                [float(state.ue_codebook.theta[ok]), float(state.bs_codebook.theta[ol])]
+            )
             # Record if this is a new OBP angle (deduplicate consecutive repeats)
-            if (not self._h_history
-                    or not np.allclose(h_current, self._h_history[-1], atol=1e-9)):
+            if not self._h_history or not np.allclose(h_current, self._h_history[-1], atol=1e-9):
                 self._h_history.append(h_current)
                 self._obp_count += 1
 

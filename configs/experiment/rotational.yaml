@@ -1,0 +1,15 @@
+defaults:
+  - /scenario: case_c_freespace_rotation
+  - /sweep: rotational_rpm
+  - /algo: all
+  - _self_
+
+name: rotational
+
+run:
+  algorithms: ${algo.algorithms}
+  n_trials: 10
+  n_steps: ${scenario.n_steps}
+  seed: 12345
+  n_workers: null
+  output_path: results
