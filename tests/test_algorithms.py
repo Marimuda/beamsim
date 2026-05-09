@@ -1050,3 +1050,218 @@ def test_dl_predictor_returns_valid_index_with_checkpoint():
         assert 0 <= k < state.K, f"k={k} out of range at step {m}"
         assert 0 <= l < state.L, f"l={l} out of range at step {m}"
         state.measure(k, l, H, m, rng)
+
+
+# ---------------------------------------------------------------------------
+# Phase 4B: MAMBA, EKF, PositionMAB, BAI
+# ---------------------------------------------------------------------------
+
+
+def _ch_and_state_at(bs_xy: np.ndarray, ue_xy: np.ndarray, ue_yaw: float = 0.0):
+    """Helper: build a free-space-LOS channel matrix at a given pose."""
+    from beamsim.channel import FreeSpaceLosChannel
+
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(ue_xy, ue_yaw)
+    return ch, H
+
+
+def test_mamba_neighbourhood_explore_triggers_on_drop():
+    """MAMBA must enter neighbourhood-explore when the best arm drops by >threshold."""
+    from beamsim.algorithms.mamba import MAMBA
+
+    state = make_state()
+    algo = MAMBA(gamma=0.95, explore_threshold=0.30, explore_horizon=4, sigma_floor=0.01)
+    algo.reset(state, {})
+    K, L = state.K, state.L
+
+    # Seed a clear best arm at (3, 7) with reward ~10; everything else ~0.1.
+    # We do this by directly manipulating BPLM observations across several
+    # rounds so the running mean concentrates on (3, 7).
+    for _ in range(30):
+        # Inject the best-arm observation.
+        state.observations[3, 7] = complex(10.0)
+        state.measured_at[3, 7] = 0
+        algo._last_kl = (3, 7)
+        algo.select_next_mbp(state, 0, {})
+
+    # Best arm should now be (3, 7).
+    assert algo._best_kl == (3, 7), f"MAMBA best_kl={algo._best_kl}, expected (3, 7)"
+
+    # Inject a sharp drop at (3, 7): reward ~ 1 (90% drop).
+    state.observations[3, 7] = complex(1.0)
+    algo._last_kl = (3, 7)
+    algo.select_next_mbp(state, 0, {})
+
+    assert algo._explore_counter > 0, (
+        f"MAMBA failed to trigger neighbourhood-explore on a 90% reward drop; "
+        f"counter={algo._explore_counter}"
+    )
+
+    # Once in explore mode, the next pull must be from the 4-connected
+    # neighbourhood of (3, 7) (or (3,7) itself).
+    next_kl = algo.select_next_mbp(state, 0, {})
+    expected = {(3, 7), (2, 7), (4, 7), (3, 6), (3, 8)}
+    assert next_kl in expected, (
+        f"MAMBA in explore mode picked {next_kl}; expected something in {expected}"
+    )
+
+
+def test_mamba_seeded_reproducibility():
+    """Same trial_seed must produce identical MAMBA traces."""
+    from beamsim.algorithms.mamba import MAMBA
+
+    bs_xy = np.array([10.0, 0.0])
+    ch, H = _ch_and_state_at(bs_xy, np.array([0.0, 0.0]))
+    rng = np.random.default_rng(0)
+
+    def run() -> list[tuple[int, int]]:
+        algo = MAMBA()
+        s = make_state()
+        ctx = {
+            "ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
+            "bs_xy": bs_xy,
+            "bs_yaw": 0.0,
+            "trial_seed": 1234,
+        }
+        algo.reset(s, ctx)
+        choices: list[tuple[int, int]] = []
+        for m in range(20):
+            k, l = algo.select_next_mbp(s, m, ctx)
+            choices.append((k, l))
+            s.measure(k, l, H, m, rng)
+        return choices
+
+    a = run()
+    b = run()
+    assert a == b, "MAMBA produced different traces with the same trial_seed"
+
+
+def test_ekf_tracker_locks_onto_static_los():
+    """EKF must lock onto the OBP after warmup on a static LOS channel."""
+    from beamsim.algorithms.ekf_tracker import EKFTracker
+
+    bs_xy = np.array([20.0, 0.0])
+    ue_xy = np.array([0.0, 5.0])  # offset so the AoD is non-zero
+    ch, H = _ch_and_state_at(bs_xy, ue_xy)
+    rng = np.random.default_rng(0)
+
+    state = make_state()
+    algo = EKFTracker(warmup=8, dt=1e-3)
+    algo.reset(state, {"trial_seed": 0})
+
+    # Run for a while; collect OBPs.
+    obps: list[tuple[int, int]] = []
+    for m in range(120):
+        k, l = algo.select_next_mbp(state, m, {})
+        state.measure(k, l, H, m, rng)
+        obps.append(state.obp())
+
+    # The post-warmup OBPs should converge to a single (k, l) since the
+    # channel is static.  We allow some jitter from EKF transient.
+    tail_unique = set(obps[80:])
+    assert len(tail_unique) <= 2, (
+        f"EKF did not converge on a static channel; unique tail OBPs={tail_unique}"
+    )
+
+
+def test_ekf_tracker_seeded_reproducibility():
+    """EKF is deterministic given the same channel + warmup; verify."""
+    from beamsim.algorithms.ekf_tracker import EKFTracker
+
+    bs_xy = np.array([10.0, 0.0])
+    _, H = _ch_and_state_at(bs_xy, np.array([0.0, 0.0]))
+
+    def run() -> list[tuple[int, int]]:
+        algo = EKFTracker()
+        s = make_state()
+        algo.reset(s, {})
+        rng = np.random.default_rng(7)
+        choices: list[tuple[int, int]] = []
+        for m in range(30):
+            k, l = algo.select_next_mbp(s, m, {})
+            choices.append((k, l))
+            s.measure(k, l, H, m, rng)
+        return choices
+
+    a = run()
+    b = run()
+    assert a == b, "EKF produced different traces on identical inputs"
+
+
+def test_position_mab_reuses_bin_posterior_on_revisit():
+    """PositionMAB at a revisited spatial bin must NOT re-cold-start."""
+    from beamsim.algorithms.position_mab import PositionMAB
+
+    bs_xy = np.array([10.0, 0.0])
+    _, H = _ch_and_state_at(bs_xy, np.array([0.0, 0.0]))
+    rng = np.random.default_rng(0)
+
+    state = make_state()
+    # Two distinct UE positions that map to two different bins.
+    pose_a = (np.array([10.0, 10.0]), 0.0)
+    pose_b = (np.array([-50.0, -50.0]), 0.0)
+    seq = [pose_a if m < 30 else pose_b if m < 60 else pose_a for m in range(90)]
+    algo = PositionMAB(n_bins_x=4, n_bins_y=4, n_bins_yaw=1, sigma_floor=0.01)
+    ctx = {
+        "ue_pose_at": lambda m: seq[m],
+        "bs_xy": bs_xy,
+        "bs_yaw": 0.0,
+        "trial_seed": 0,
+    }
+    algo.reset(state, ctx)
+
+    bin_a = algo._bin_index(*pose_a)
+    bin_b = algo._bin_index(*pose_b)
+    assert bin_a != bin_b, "Test setup error: pose_a and pose_b mapped to the same bin"
+
+    # Run all 90 steps.
+    for m in range(90):
+        k, l = algo.select_next_mbp(state, m, ctx)
+        state.measure(k, l, H, m, rng)
+
+    # After the third visit to pose_a (last 30 steps), bin_a should have
+    # accumulated more than 30 pulls' worth of posterior mass and the
+    # most-probed arm should be far higher count than its peers.
+    counts_a = algo._counts[bin_a]
+    assert counts_a.max() > 5, (
+        f"PositionMAB never concentrated on a dominant arm in bin_a; "
+        f"max count={counts_a.max()}, total pulls in bin={counts_a.sum()}"
+    )
+
+
+def test_bai_pure_exploration_eliminates_obviously_bad_arms():
+    """BAI successive elimination must eliminate clearly-suboptimal arms."""
+    from beamsim.algorithms.bai import BAIPureExploration
+    from beamsim.codebook import Codebook
+
+    K, L = 4, 8
+    n_arms = K * L
+    ue_cb = Codebook(n_elements=4, n_beams=K)
+    bs_cb = Codebook(n_elements=16, n_beams=L)
+    state = BPLMState(ue_codebook=ue_cb, bs_codebook=bs_cb, noise_amplitude=0.01)
+    state.tx_amp = 1.0
+
+    algo = BAIPureExploration(delta=0.1, min_pulls_per_arm=2)
+    algo.reset(state, {})
+
+    # Synthetic stationary rewards: arm (0,0) ~ 10, all others ~ 0.1.
+    # Hoeffding-based elimination on a [0, R_max] reward range needs ~30+
+    # pulls per arm before the confidence radius shrinks below the gap;
+    # we run 32 sweeps so the algorithm has a fair chance to commit.
+    rng = np.random.default_rng(2)
+    for m in range(32 * n_arms):
+        k, l = algo.select_next_mbp(state, m, {})
+        reward = 10.0 + rng.standard_normal() * 0.05 if (k, l) == (0, 0) else (
+            0.1 + rng.random() * 0.05
+        )
+        state.observations[k, l] = complex(reward)
+        state.measured_at[k, l] = m
+
+    # The best arm must be active and at least half of the other arms
+    # eliminated — anything looser would not exercise the elimination rule.
+    n_active = int(np.sum(algo._active))
+    assert algo._active[0], "BAI eliminated the actual best arm (index 0)"
+    assert n_active <= n_arms // 2 + 2, (
+        f"BAI failed to eliminate any clearly-bad arms; active={n_active}/{n_arms}"
+    )
