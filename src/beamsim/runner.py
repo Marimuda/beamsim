@@ -51,6 +51,7 @@ from beamsim.algorithms import ALL_ALGORITHMS
 from beamsim.bplm import BPLMState
 from beamsim.codebook import make_default_bs_codebook, make_default_ue_codebook
 from beamsim.geometry import Track
+from beamsim.metrics import oracle_snr_db as _oracle_snr_db
 
 # ---------------------------------------------------------------------------
 # Data structures
@@ -68,7 +69,9 @@ class TrialResult:
     snr_db_best: dict[str, NDArray[np.float64]] | None = (
         None  # algo -> (n_steps,); None if single-BS
     )
-    snr_oracle: NDArray[np.float64] | None = None  # (n_steps,) true oracle; None if single-BS
+    snr_oracle: NDArray[np.float64] | None = (
+        None  # (n_steps,) codebook oracle; populated for both single-BS and multi-BS
+    )
 
 
 @dataclass
@@ -173,13 +176,22 @@ def _run_trial(
     # Codebook oracle: max over all (BS, k, l) of noiseless post-beamforming
     # SNR, i.e. the strongest SNR achievable on the *simulated finite UE×BS
     # codebook* given the same channel realisation. Not Shannon capacity.
-    snr_oracle_out: NDArray[np.float64] | None = np.zeros(experiment.n_steps) if multi_bs else None
+    snr_oracle_out: NDArray[np.float64] = np.zeros(experiment.n_steps)
 
-    # Pre-build full codebook matrices for vectorised oracle computation.
-    # W: (K, n_ue_elements), F: (L, n_bs_elements)
+    # Pre-build full codebook weight matrices once for vectorised oracle.
+    # ue_cb.matrix is (n_ue_elements, K); .T gives (K, n_ue_elements).
+    # bs_cb.matrix is (n_bs_elements, L); .T gives (L, n_bs_elements).
+    # These shapes match what oracle_snr_db / _oracle_snr_db expects.
+    _UE_W = ue_cb.matrix.T  # type: ignore[attr-defined]  # (K, n_ue_elements)
+    _BS_F = bs_cb.matrix.T  # type: ignore[attr-defined]  # (L, n_bs_elements)
+
+    # Single-BS H collector; filled lazily on the first step of the main loop.
+    _H_steps: NDArray[np.complex128] | None = None
+
     if multi_bs:
-        _W = ue_cb.matrix.T.conj()  # type: ignore[attr-defined]  # Codebook factory returns object; .matrix exists at runtime
-        _F = bs_cb.matrix.T  # type: ignore[attr-defined]  # same
+        # Multi-BS oracle uses a pre-conjugated form for the inline einsum path.
+        _W = _UE_W.conj()  # (K, n_ue_elements) — conjugated for einsum "ki,bij,lj"
+        _F = _BS_F  # (L, n_bs_elements)
         _sigma_sq = experiment.noise_amplitude**2
         _tx_amp_sq = experiment.tx_amp**2
 
@@ -198,7 +210,7 @@ def _run_trial(
         context["true_H"] = H_per_bs[0]
 
         # Oracle: max noiseless SNR over all (BS, k, l) — algo-independent.
-        if multi_bs and snr_oracle_out is not None:
+        if multi_bs:
             # H_stack: (n_bs, Nue, Nbs)
             H_stack = np.stack(H_per_bs, axis=0)
             # gains[b, k, l] = |w_k^H @ H_b @ f_l|^2
@@ -207,6 +219,13 @@ def _run_trial(
             gains = np.abs(np.einsum("ki,bij,lj->bkl", _W, H_stack, _F)) ** 2
             oracle_lin = float(gains.max()) * _tx_amp_sq / _sigma_sq
             snr_oracle_out[m] = 10.0 * np.log10(max(oracle_lin, 1e-10))
+        else:
+            # Single-BS: accumulate H matrices for batch oracle computation
+            # after the loop; lazy allocation on the first step.
+            H0 = H_per_bs[0]
+            if _H_steps is None:
+                _H_steps = np.empty((experiment.n_steps, *H0.shape), dtype=np.complex128)
+            _H_steps[m] = H0
 
         for a_idx, algo_name in enumerate(experiment.algorithms):
             noise_rng = algo_noise_rngs[a_idx]
@@ -245,6 +264,17 @@ def _run_trial(
                 snr_lin = bs_snr_lin[0]
 
             snr_db[algo_name][m] = 10.0 * np.log10(max(snr_lin, 1e-10))
+
+    # Single-BS oracle: compute vectorised over all steps now that H_steps
+    # is fully populated.  _oracle_snr_db expects (n_steps, n_ue, n_bs).
+    if not multi_bs and _H_steps is not None:
+        snr_oracle_out = _oracle_snr_db(
+            _H_steps,
+            _UE_W,
+            _BS_F,
+            noise_amplitude=experiment.noise_amplitude,
+            tx_amp=experiment.tx_amp,
+        )
 
     return TrialResult(
         snr_db=snr_db,
@@ -339,9 +369,7 @@ def run_experiment(
     snr_db_best_agg: dict[str, NDArray[np.float64]] | None = (
         {a: np.zeros((n_trials, experiment.n_steps)) for a in algos} if multi_bs else None
     )
-    snr_oracle_agg: NDArray[np.float64] | None = (
-        np.zeros((n_trials, experiment.n_steps)) if multi_bs else None
-    )
+    snr_oracle_agg: NDArray[np.float64] = np.zeros((n_trials, experiment.n_steps))
     seeds = np.zeros(n_trials, dtype=np.int64)
 
     # Progress bar (optional)
@@ -368,7 +396,7 @@ def run_experiment(
                     sel_bs_out[a][t] = result.selected_bs[a]
                 if snr_db_best_agg is not None and result.snr_db_best is not None:
                     snr_db_best_agg[a][t] = result.snr_db_best[a]
-            if snr_oracle_agg is not None and result.snr_oracle is not None:
+            if result.snr_oracle is not None:
                 snr_oracle_agg[t] = result.snr_oracle
             if pbar is not None:
                 pbar.update(1)

@@ -9,7 +9,9 @@ from __future__ import annotations
 import numpy as np
 
 from beamsim.channel import FreeSpaceLosChannel
+from beamsim.codebook import make_default_bs_codebook, make_default_ue_codebook
 from beamsim.geometry import Track, rotation_track
+from beamsim.metrics import oracle_snr_db
 from beamsim.runner import Experiment, TrialResult, _run_trial, run_experiment, save_experiment
 
 # ---------------------------------------------------------------------------
@@ -152,6 +154,124 @@ class TestRunExperiment:
         algo = "exhaustive"
         assert not np.allclose(ra["snr_db"][algo], rb["snr_db"][algo]), (
             "Different seeds produced identical SNR matrices"
+        )
+
+    def test_single_bs_oracle_populated(self):
+        """Single-BS experiment must populate snr_oracle with shape (n_trials, n_steps)."""
+        n_trials, n_steps = 2, 20
+        exp = Experiment(
+            name="oracle_smoke",
+            n_steps=n_steps,
+            dt=0.01,
+            n_trials=n_trials,
+            algorithms=["exhaustive"],
+            bs_positions=[(10.0, 0.0)],
+            bs_yaws=[0.0],
+            track_factory=_track_factory,
+            channel_factory=_channel_factory,
+            noise_amplitude=1e-3,
+            tx_amp=1.0,
+            seed=42,
+        )
+        result = run_experiment(exp, n_workers=1, progress=False)
+        assert result["snr_oracle"] is not None, "snr_oracle should be populated for single-BS"
+        assert result["snr_oracle"].shape == (n_trials, n_steps), (
+            f"expected ({n_trials}, {n_steps}), got {result['snr_oracle'].shape}"
+        )
+        assert np.all(np.isfinite(result["snr_oracle"])), "snr_oracle contains non-finite values"
+
+    def test_oracle_dominates_achieved_single_bs(self):
+        """Oracle SNR >= achieved SNR for Perfect algorithm in single-BS (noiseless signal path)."""
+        n_trials, n_steps = 2, 20
+        exp = Experiment(
+            name="oracle_domination",
+            n_steps=n_steps,
+            dt=0.01,
+            n_trials=n_trials,
+            algorithms=["perfect"],
+            bs_positions=[(10.0, 0.0)],
+            bs_yaws=[0.0],
+            track_factory=_track_factory,
+            channel_factory=_channel_factory,
+            noise_amplitude=1e-3,
+            tx_amp=1.0,
+            seed=99,
+        )
+        result = run_experiment(exp, n_workers=1, progress=False)
+        oracle = result["snr_oracle"]  # (n_trials, n_steps)
+        achieved = result["snr_db"]["perfect"]  # (n_trials, n_steps)
+        # Oracle must dominate achieved up to a small tolerance for floating-point
+        # rounding; noise can push achieved slightly above the noiseless oracle.
+        eps_db = 1e-3
+        assert np.all(oracle >= achieved - eps_db), (
+            f"oracle dropped below achieved: max gap = {(achieved - oracle).max():.4f} dB"
+        )
+
+    def test_oracle_matches_metrics_function(self):
+        """runner snr_oracle must equal metrics.oracle_snr_db called on the same H sequence."""
+        n_steps = 15
+        exp = Experiment(
+            name="oracle_consistency",
+            n_steps=n_steps,
+            dt=0.01,
+            n_trials=1,
+            algorithms=["exhaustive"],
+            bs_positions=[(10.0, 0.0)],
+            bs_yaws=[0.0],
+            track_factory=_track_factory,
+            channel_factory=_channel_factory,
+            noise_amplitude=1e-3,
+            tx_amp=1.0,
+            seed=7,
+        )
+        # Run single trial directly (in-process, no subprocess)
+        trial_result = _run_trial(0, exp)
+        runner_oracle = trial_result.snr_oracle
+        assert runner_oracle is not None
+
+        # Recompute oracle from the same channel independently
+        ue_cb = make_default_ue_codebook()
+        bs_cb = make_default_bs_codebook()
+
+        from beamsim.channel import FreeSpaceLosChannel
+        from beamsim.geometry import rotation_track
+
+        trial_seed = int(exp.seed) ^ 0
+        root_rng = np.random.default_rng(trial_seed)
+        track_rng, _channel_rng = root_rng.spawn(2)
+        channel = FreeSpaceLosChannel(
+            bs_xy=_BS_XY,
+            bs_yaw=_BS_YAW,
+            n_bs_elements=_N_BS_ELEMENTS,
+            n_ue_elements=_N_UE_ELEMENTS,
+        )
+        track = rotation_track(
+            position_xy=(0.0, 0.0),
+            rpm=6.0,
+            n_steps=n_steps,
+            dt=0.01,
+            initial_orientation=float(track_rng.uniform(0, 2 * np.pi)),
+        )
+        H_seq = np.stack(
+            [
+                channel.channel_matrix(track.positions[m], float(track.orientations[m]), m * exp.dt)
+                for m in range(n_steps)
+            ]
+        )
+        expected = oracle_snr_db(
+            H_seq,
+            ue_cb.matrix.T,
+            bs_cb.matrix.T,
+            noise_amplitude=exp.noise_amplitude,
+            tx_amp=exp.tx_amp,
+        )
+        np.testing.assert_allclose(
+            runner_oracle,
+            expected,
+            atol=1e-10,
+            err_msg=(
+                "runner snr_oracle diverges from metrics.oracle_snr_db on identical H sequence"
+            ),
         )
 
 
