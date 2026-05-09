@@ -25,7 +25,7 @@ from beamsim.codebook import Codebook, PlanarCodebook
 from beamsim.geometry import Track
 from beamsim.runner import Experiment, TrialResult, run_experiment, save_experiment
 
-__version__ = "0.3.0"
+__version__ = "0.3.1"
 
 __all__ = [
     "BPLMState",

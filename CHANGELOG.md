@@ -7,6 +7,48 @@ public surface is still pre-1.0 — minor versions may break API.
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-05-09
+
+Patch release: a single physics fix to the knife-edge-diffraction
+(KED) blockage attenuation, plus a follow-up to the audit
+investigation that resolved the `W_HIGH` and MCMD slot-7 questions.
+
+### Fixed
+
+- **KED attenuation formula** (`channel._ked_attenuation_db`). Replaced
+  the hardcoded magic constant `lambda_eff = 0.4` with the physically
+  motivated Fresnel-zone-like length scale `π · r / λ`, where
+  `r = blocker_radius_m` (default 10 m, matching the predecessor
+  MATLAB simulator's `blockage.m`) and `λ = c / fc_hz` (the carrier
+  wavelength). The previous expression `(π/λ_eff − 1)/cos` also had
+  the wrong algebraic form: TR 38.901 §7.6.4.1 / Eq 3.17 of the
+  predecessor MSc report specifies `π·r/λ · (1/cos − 1)` inside the
+  square root. The corrected formula produces physically meaningful
+  attenuation depths near the blocker edge and now scales with both
+  the wavelength and the blocker depth as it should.
+- `BlockageState` now carries `wavelength_m` and `blocker_radius_m`
+  fields; both default to the 28 GHz / 10 m configuration that
+  matches MATLAB. `_init_blockage_state` accepts an `fc_hz` argument
+  threaded from `ChannelParams.fc_hz`.
+
+### Changed
+
+- `docs/MATLAB_PARITY.md` updated with the W_HIGH / MCMD-slot-7
+  investigation: both turned out to be cases where Python is
+  *thesis-faithful* (matching the published Fig 5.26 percentages and
+  the three-criterion MCMD design described in the thesis text) and
+  the MATLAB code is a later un-published re-fit. No code change to
+  MCMD; the `Bugs in Python (MATLAB is the correct reference)`
+  category of the audit is now empty.
+- The audit's severity ranking is reordered to reflect the resolved
+  status: KED moves to entry 5 (resolved this release); the path-loss
+  two-slope, self-blocker, and cluster-delay items remain documented
+  divergences where Python is the more standards-conformant choice.
+
+### Test count
+
+248 → 250 passing.
+
 ## [0.3.0] — 2026-05-09
 
 Minor release: closes the largest gaps from the MATLAB-parity audit
@@ -215,7 +257,8 @@ extended with SOTA baselines for the journal-paper reformulation.
 - Cosine-spaced ULA codebook, mobility tracks (rotation / straight line).
 - Simplified TR 38.901 GSCM, BPLM bookkeeping, six initial MBP policies.
 
-[Unreleased]: https://github.com/Marimuda/beamsim/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/Marimuda/beamsim/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/Marimuda/beamsim/releases/tag/v0.3.1
 [0.3.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Marimuda/beamsim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.2.0
