@@ -593,9 +593,10 @@ def test_perfect_matches_exhaustive_best_pair():
 
     for m in range(5):
         k, l = algo.select_next_mbp(state, m, context)
-        assert (k, l) == (int(best_k), int(best_l)), (
-            f"Step {m}: Perfect returned ({k},{l}), expected ({best_k},{best_l})"
-        )
+        assert (k, l) == (
+            int(best_k),
+            int(best_l),
+        ), f"Step {m}: Perfect returned ({k},{l}), expected ({best_k},{best_l})"
 
 
 # ---------------------------------------------------------------------------
@@ -1073,7 +1074,6 @@ def test_mamba_neighbourhood_explore_triggers_on_drop():
     state = make_state()
     algo = MAMBA(gamma=0.95, explore_threshold=0.30, explore_horizon=4, sigma_floor=0.01)
     algo.reset(state, {})
-    K, L = state.K, state.L
 
     # Seed a clear best arm at (3, 7) with reward ~10; everything else ~0.1.
     # We do this by directly manipulating BPLM observations across several
@@ -1112,7 +1112,7 @@ def test_mamba_seeded_reproducibility():
     from beamsim.algorithms.mamba import MAMBA
 
     bs_xy = np.array([10.0, 0.0])
-    ch, H = _ch_and_state_at(bs_xy, np.array([0.0, 0.0]))
+    _ch, H = _ch_and_state_at(bs_xy, np.array([0.0, 0.0]))
     rng = np.random.default_rng(0)
 
     def run() -> list[tuple[int, int]]:
@@ -1143,7 +1143,7 @@ def test_ekf_tracker_locks_onto_static_los():
 
     bs_xy = np.array([20.0, 0.0])
     ue_xy = np.array([0.0, 5.0])  # offset so the AoD is non-zero
-    ch, H = _ch_and_state_at(bs_xy, ue_xy)
+    _ch, H = _ch_and_state_at(bs_xy, ue_xy)
     rng = np.random.default_rng(0)
 
     state = make_state()
@@ -1252,8 +1252,8 @@ def test_bai_pure_exploration_eliminates_obviously_bad_arms():
     rng = np.random.default_rng(2)
     for m in range(32 * n_arms):
         k, l = algo.select_next_mbp(state, m, {})
-        reward = 10.0 + rng.standard_normal() * 0.05 if (k, l) == (0, 0) else (
-            0.1 + rng.random() * 0.05
+        reward = (
+            10.0 + rng.standard_normal() * 0.05 if (k, l) == (0, 0) else (0.1 + rng.random() * 0.05)
         )
         state.observations[k, l] = complex(reward)
         state.measured_at[k, l] = m

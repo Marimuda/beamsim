@@ -119,9 +119,12 @@ class MAMBA(Algorithm):
             # Neighbourhood-explore trigger: if the just-pulled arm was the
             # best one and its single-pull reward fell well below the running
             # mean, kick into local-explore for a horizon.
-            if (pk, pl) == self._best_kl and self._best_mean > 0.0:
-                if reward < (1.0 - self._explore_threshold) * self._best_mean:
-                    self._explore_counter = self._explore_horizon
+            if (
+                (pk, pl) == self._best_kl
+                and self._best_mean > 0.0
+                and reward < (1.0 - self._explore_threshold) * self._best_mean
+            ):
+                self._explore_counter = self._explore_horizon
 
         # Update best-arm tracker (after the update above so it stays current).
         flat_best = int(np.argmax(self._mean))
