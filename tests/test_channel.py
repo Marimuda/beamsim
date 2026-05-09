@@ -462,13 +462,19 @@ def test_self_blocker_attenuates_when_bs_at_back():
     )
 
 
+# Default 28 GHz parameters used throughout the KED tests so the
+# physical Fresnel-zone-like scale pi * r / lambda is well-defined.
+_KED_LAMBDA = 2.998e8 / 28e9  # ≈ 1.07 cm
+_KED_RADIUS = 10.0
+
+
 def test_ked_attenuation_zero_outside_blocker():
     """KED attenuation outside the blocker angular span must be zero."""
     phi_k = 0.0
     x_k = math.radians(10.0)
     # Angle well outside the span
     phi_far = np.array([math.radians(90.0)])
-    atten = _ked_attenuation_db(phi_far, phi_k, x_k)
+    atten = _ked_attenuation_db(phi_far, phi_k, x_k, _KED_LAMBDA, _KED_RADIUS)
     assert atten[0] == pytest.approx(0.0, abs=1e-9)
 
 
@@ -477,8 +483,37 @@ def test_ked_attenuation_nonzero_inside_blocker():
     phi_k = 0.0
     x_k = math.radians(10.0)
     phi_inside = np.array([0.0])  # centre of blocker
-    atten = _ked_attenuation_db(phi_inside, phi_k, x_k)
+    atten = _ked_attenuation_db(phi_inside, phi_k, x_k, _KED_LAMBDA, _KED_RADIUS)
     assert atten[0] > 0.0
+
+
+def test_ked_attenuation_scales_with_blocker_radius():
+    """Larger blocker radius -> deeper attenuation at oblique incidence."""
+    phi_k = 0.0
+    x_k = math.radians(10.0)
+    # Angle just inside the edge -- where r / lambda matters most.
+    phi_edge = np.array([math.radians(4.5)])
+    atten_thin = _ked_attenuation_db(phi_edge, phi_k, x_k, _KED_LAMBDA, blocker_radius_m=1.0)
+    atten_thick = _ked_attenuation_db(phi_edge, phi_k, x_k, _KED_LAMBDA, blocker_radius_m=10.0)
+    assert atten_thick > atten_thin
+    # And both must be physically sensible attenuations (well below 200 dB ceiling).
+    assert atten_thin[0] < 200.0
+    assert atten_thick[0] < 200.0
+
+
+def test_ked_attenuation_scales_with_wavelength():
+    """Longer wavelength -> shallower attenuation (smaller pi*r/lambda)."""
+    phi_k = 0.0
+    x_k = math.radians(10.0)
+    phi_edge = np.array([math.radians(4.5)])
+    # 700 MHz: lambda ≈ 0.43 m, much larger than 28 GHz lambda ≈ 1.07 cm
+    atten_long_lambda = _ked_attenuation_db(
+        phi_edge, phi_k, x_k, wavelength_m=2.998e8 / 700e6, blocker_radius_m=_KED_RADIUS
+    )
+    atten_short_lambda = _ked_attenuation_db(
+        phi_edge, phi_k, x_k, wavelength_m=_KED_LAMBDA, blocker_radius_m=_KED_RADIUS
+    )
+    assert atten_short_lambda > atten_long_lambda
 
 
 def test_non_self_blocker_drifts_over_position():

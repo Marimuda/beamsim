@@ -364,15 +364,58 @@ def _laplacian_subray_offsets(
 
 
 def _ked_attenuation_db(
-    phi_rel: NDArray[np.float64], phi_k: float, x_k: float
+    phi_rel: NDArray[np.float64],
+    phi_k: float,
+    x_k: float,
+    wavelength_m: float,
+    blocker_radius_m: float = 10.0,
 ) -> NDArray[np.float64]:
     """KED-based attenuation (dB) for a single non-self blocker (Eq 3.16–3.17).
 
-    phi_rel: array of relative AoA angles (rad) in UE body frame.
-    phi_k:   blocker centre angle (rad).
-    x_k:     blocker width (rad).
+    Implements the TR 38.901 §7.6.4.1 / predecessor MSc thesis Eq 3.17
+    knife-edge-diffraction (KED) formula:
 
-    Returns attenuation array in dB (>= 0).
+    .. math::
+
+        \\beta_k(\\varphi) = \\frac{\\pi}{2}
+            \\sqrt{\\frac{\\pi r}{\\lambda}\\left(\\frac{1}{\\cos\\alpha} - 1\\right)},
+        \\quad
+        F_x = \\frac{1}{\\pi}\\arctan(\\pm\\beta_k(\\varphi)),
+
+    with the per-region sign pattern of Eq 3.16's table, then
+
+    .. math::
+
+        L_k(\\varphi) = -20\\log_{10}\\!\\left(1 - (F_{a,+} + F_{a,-})\\right)
+
+    in the azimuth-only 2-D simplification (the TR's elevation
+    factor :math:`F_z` is dropped for the azimuth-plane study, equivalent
+    to setting :math:`F_{z,+} + F_{z,-} = 1` for full elevation aperture).
+
+    Parameters
+    ----------
+    phi_rel:
+        Relative AoA angles (rad) in UE body frame.
+    phi_k:
+        Blocker centre angle (rad).
+    x_k:
+        Blocker width (rad).
+    wavelength_m:
+        Carrier wavelength :math:`\\lambda = c / f_c` in metres.
+    blocker_radius_m:
+        Blocker depth :math:`r` in metres (Fresnel-zone-like scale).
+        Defaults to 10 m, matching the predecessor MATLAB simulator's
+        ``blockage.m`` constant. The dimensionless scale
+        :math:`\\pi r / \\lambda` enters the formula and is what makes
+        the attenuation depth at oblique incidence physically meaningful;
+        previously a hardcoded ``lambda_eff = 0.4`` shape parameter
+        replaced :math:`\\pi r / \\lambda` with no physical motivation,
+        producing systematically shallower KED attenuation at angles
+        near the blocker edge.
+
+    Returns
+    -------
+    Attenuation array in dB (>= 0), same shape as ``phi_rel``.
     """
     half = x_k / 2.0
     delta = phi_rel - phi_k
@@ -380,39 +423,43 @@ def _ked_attenuation_db(
     delta = (delta + np.pi) % (2 * np.pi) - np.pi
 
     outside = np.abs(delta) > x_k
-    result = np.zeros_like(phi_rel)
 
-    # Determine sign pattern per angular region (Eq 3.16 sign table)
-    sign_plus = np.where(delta > half, -1.0, np.where(delta >= -half, 1.0, 1.0))
-    sign_minus = np.where(delta > half, 1.0, np.where(delta >= -half, 1.0, -1.0))
+    # Sign pattern per angular region (Eq 3.16 sign table):
+    #   delta > +x_k/2   → (-, +)  (outer right of edge)
+    #   |delta| ≤ x_k/2  → (+, +)  (inside the blocker)
+    #   delta < -x_k/2   → (+, -)  (outer left of edge)
+    sign_plus = np.where(delta > half, -1.0, 1.0)
+    sign_minus = np.where(delta < -half, -1.0, 1.0)
 
-    # Eq 3.17: beta_k(phi) = (pi/2) * sqrt((pi/lambda_eff) - 1) / cos(delta - half)
-    # The TR 38.901 formula uses lambda=0.4 m (≈750 MHz) as a shape parameter.
-    # We interpret it as a dimensionless shape parameter beta_scale = pi/lambda_eff.
-    # From the report Eq 3.17: beta = (pi/2)*sqrt((pi/lambda_eff - 1) / |cos(delta - half)|)
-    # We use lambda_eff = 0.4 (shape, not wavelength) as per TR 38.901 §7.6.4.1.
-    lambda_eff = 0.4
-    beta_scale = np.pi / lambda_eff - 1.0  # = pi/0.4 - 1 ≈ 6.85
+    # Dimensionless Fresnel-zone-like length scale: π·r/λ.
+    # At 28 GHz (λ ≈ 1.07 cm) with r = 10 m, this is ≈ 2940 — orders of
+    # magnitude larger than the previous magic constant 0.4, hence the
+    # earlier implementation under-attenuated KED edges.
+    scale = np.pi * blocker_radius_m / wavelength_m
 
     with np.errstate(divide="ignore", invalid="ignore"):
         cos_val_plus = np.cos(np.abs(delta) - half)
         cos_val_minus = np.cos(np.abs(delta) + half)
-        # Avoid division by zero at edges
         cos_val_plus = np.where(np.abs(cos_val_plus) < 1e-9, 1e-9, cos_val_plus)
         cos_val_minus = np.where(np.abs(cos_val_minus) < 1e-9, 1e-9, cos_val_minus)
 
-        beta_plus = (np.pi / 2.0) * np.sqrt(np.maximum(beta_scale / np.abs(cos_val_plus), 0.0))
-        beta_minus = (np.pi / 2.0) * np.sqrt(np.maximum(beta_scale / np.abs(cos_val_minus), 0.0))
+        # Inner expression: scale * (1/cos − 1). Clamp at 0 to avoid
+        # negative arguments to sqrt when 1/cos drifts below 1 due to
+        # floating-point noise at exactly delta = ±x_k/2.
+        inner_plus = scale * np.maximum(1.0 / np.abs(cos_val_plus) - 1.0, 0.0)
+        inner_minus = scale * np.maximum(1.0 / np.abs(cos_val_minus) - 1.0, 0.0)
 
-    t_plus = np.arctan(sign_plus * beta_plus) / np.pi
-    t_minus = np.arctan(sign_minus * beta_minus) / np.pi
+        beta_plus = (np.pi / 2.0) * np.sqrt(inner_plus)
+        beta_minus = (np.pi / 2.0) * np.sqrt(inner_minus)
 
-    # Eq 3.16: L_k = 20*log10(1 - t_plus - t_minus) * 22   [clipped at 0]
-    inner = 1.0 - t_plus - t_minus
+    f_plus = np.arctan(sign_plus * beta_plus) / np.pi
+    f_minus = np.arctan(sign_minus * beta_minus) / np.pi
+
+    # Eq 3.16 (azimuth-only): L_k = -20·log10(1 - (F+ + F−))
+    inner = 1.0 - (f_plus + f_minus)
     inner = np.maximum(inner, 1e-10)
-    atten = np.abs(20.0 * np.log10(inner) * 22.0)
-    result = np.where(outside, 0.0, atten)
-    return result
+    atten = -20.0 * np.log10(inner)
+    return np.where(outside, 0.0, atten)
 
 
 @dataclass
@@ -421,12 +468,19 @@ class BlockageState:
 
     Initialised once per trial; updated per channel_matrix() call via
     update(ue_xy, time_s).  Implements Eq 3.18 autocorrelation model.
+
+    The KED attenuation formula uses the carrier wavelength and the
+    blocker radius (depth) as physical inputs; both are stored on the
+    state so :func:`_ked_attenuation_db` does not need them threaded
+    through every call site.
     """
 
     n_non_self: int
     phi_k: NDArray[np.float64]  # non-self blocker centre angles (rad), body frame
     x_k: NDArray[np.float64]  # non-self blocker widths (rad)
     self_width_rad: float  # self-blocker width (rad)
+    wavelength_m: float = SPEED_OF_LIGHT / 28e9  # default to 28 GHz; replaced at init
+    blocker_radius_m: float = 10.0  # KED blocker depth, matching MATLAB blockage.m
     self_centre_rad: float = math.pi  # centre at back of UE (180 deg)
     _prev_ue_xy: NDArray[np.float64] | None = field(default=None)
     _dcorr_m: float = 10.0  # correlation distance (m)
@@ -462,12 +516,23 @@ class BlockageState:
 
         # Non-self blockers (Eqs 3.16–3.17)
         for k in range(self.n_non_self):
-            total += _ked_attenuation_db(aoa_body_frame, self.phi_k[k], self.x_k[k])
+            total += _ked_attenuation_db(
+                aoa_body_frame,
+                self.phi_k[k],
+                self.x_k[k],
+                wavelength_m=self.wavelength_m,
+                blocker_radius_m=self.blocker_radius_m,
+            )
 
         return total
 
 
-def _init_blockage_state(rng: np.random.Generator, self_width_deg: float) -> BlockageState:
+def _init_blockage_state(
+    rng: np.random.Generator,
+    self_width_deg: float,
+    fc_hz: float = 28e9,
+    blocker_radius_m: float = 10.0,
+) -> BlockageState:
     """Initialise blockage state: 1 self-blocker + 4 non-self blockers."""
     n = 4
     phi_k = rng.uniform(-np.pi, np.pi, size=n)
@@ -477,6 +542,8 @@ def _init_blockage_state(rng: np.random.Generator, self_width_deg: float) -> Blo
         phi_k=phi_k,
         x_k=x_k,
         self_width_rad=math.radians(self_width_deg),
+        wavelength_m=SPEED_OF_LIGHT / fc_hz,
+        blocker_radius_m=blocker_radius_m,
         _rng=rng,
     )
 
@@ -578,7 +645,7 @@ class ChannelRealisation:
         # ------------------------------------------------------------------
         # Blockage state (Model A, Sec 3.2.4)
         # ------------------------------------------------------------------
-        self._blockage = _init_blockage_state(rng, p.self_blocker_width_deg)
+        self._blockage = _init_blockage_state(rng, p.self_blocker_width_deg, fc_hz=p.fc_hz)
 
     def _apply_blockage(
         self, ue_xy: NDArray[np.float64], ue_yaw: float, cluster_aoa_world: NDArray[np.float64]
