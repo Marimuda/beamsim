@@ -7,26 +7,75 @@ public surface is still pre-1.0 — minor versions may break API.
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-05-09
+
+Public-API addition release: four codebook-oracle / regret / outage /
+beam-switch metrics land in `beamsim.metrics`, and the repository
+adopts the modern beam-management evaluation vocabulary in its docs
+without changing the simulator's scientific object.
+
 ### Added
 
-- Repository hygiene pass: `LICENSE` (MIT), `CITATION.cff`, `CHANGELOG.md`,
-  `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `SECURITY.md`.
-- `Makefile` with `install / format / lint / type / test / cov / check /
-  docs / build / clean / hooks` targets.
-- `py.typed` marker; curated public surface in `beamsim/__init__.py`.
-- Hardened pre-commit (EOF / trailing-whitespace / large-file / private-key /
-  YAML-TOML-JSON validation).
-- GitHub Actions CI matrix (Python 3.10/3.11/3.12 on Linux + macOS).
-- Dependabot, issue templates, PR template, MkDocs documentation scaffold,
-  `examples/minimal_example.py` smoke test, coverage configuration.
+- `metrics.oracle_snr_db(channel_matrices, ue_weights, bs_weights,
+  noise_amplitude, tx_amp)` — vectorised exhaustive scan over the
+  finite UE × BS codebook for the same channel realisation. Documented
+  as the *codebook* oracle; explicitly not Shannon capacity and not a
+  deployable policy.
+- `metrics.snr_regret_db(achieved, oracle)` — additive dB gap with
+  sign convention `oracle − achieved` (lower is better, zero is
+  optimal under the simulated codebook). Documented as a dB-domain
+  gap, not a linear-power regret functional.
+- `metrics.outage_probability(snr_db, threshold_db)` — pooled scalar
+  `Pr(SNR_dB < threshold_db)` with strict inequality and explicit NaN
+  propagation.
+- `metrics.beam_switch_rate(obp_history)` — fraction of consecutive
+  step pairs at which (k, l) changes; explicit `n_steps − 1`
+  denominator; returns `0.0` for traces of length < 2.
+- `docs/SOTA_BASELINES.md`: new "Algorithms by measurement budget"
+  taxonomy table classifying every shipped algorithm by probe budget
+  per decision (oracle-like → coarse-to-fine → compressive →
+  local/temporal → uncertainty-aware adaptive → predictive → genie).
+- `docs/related_work.md`: new "Initial access vs. tracking vs.
+  recovery" subsection that explicitly marks 3GPP-style beam-failure
+  recovery (BFR) as out of scope.
+- `docs/ROADMAP.md`: deferred-work register covering per-algorithm
+  measurement budgets and reacquisition time after blockage, each
+  with the architectural change required to land it.
+- README "Methodological commitments" section elevating
+  common-random-numbers paired evaluation, codebook-oracle regret,
+  and the overhead/switching/outage metric set as first-class
+  contributions.
+- 25 new tests covering shape handling, NaN behaviour, threshold
+  boundary, switch-rate denominators, oracle-dominates-specific-probe,
+  and BPLM-convention agreement on a single-pair codebook.
 
 ### Changed
 
-- All `print` calls in library code replaced with `logging.getLogger(__name__)`.
-- `pyproject.toml`: populated authors/license/classifiers/URLs; split
-  optional dependencies into `[test]`, `[docs]`, `[dl]`, and `[dev]`.
+- "Oracle" terminology disambiguated across `runner.py`,
+  `algorithms/perfect.py`, and `docs/SOTA_BASELINES.md` so every
+  reference now reads as the *codebook* oracle (not Shannon capacity).
+- `metrics.snr_regret_db` docstring spells out the dB-vs-linear-power
+  semantics with the formula
+  `regret_dB(t) = 10·log10(SNR_oracle(t) / SNR_achieved(t))`.
+- `metrics.outage_probability` docstring leads with the defining
+  formula and the strict-inequality justification (deterministic
+  tests can equal the threshold by construction).
+- `metrics.beam_switch_rate` docstring leads with the explicit
+  `n_steps − 1` denominator and reasons out the `0.0` return on
+  single-step traces.
 
-## [0.1.0] — 2026-05-09 *(unreleased on GitHub)*
+## [0.1.0] — 2026-05-09 *(unreleased on GitHub; superseded by 0.2.0 the same day)*
+
+The 0.1.0 line covered the scholarly-hygiene pass: `LICENSE`,
+`CITATION.cff`, `CHANGELOG.md`, `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`,
+`SECURITY.md`, `Makefile`, `py.typed`, hardened pre-commit, GitHub
+Actions CI matrix (Py 3.10/3.11/3.12 × Linux/macOS), Dependabot, issue
+and PR templates, MkDocs documentation scaffold,
+`examples/minimal_example.py`, coverage configuration. Library code's
+remaining `print` calls were migrated to `logging`. `pyproject.toml`
+gained authors/license/classifiers/URLs and split optional dependencies
+into `[test]`, `[docs]`, `[dl]`, and `[dev]`. No GitHub release was cut
+for 0.1.0 in isolation.
 
 The full Phase-1…Phase-4C reproduction of the predecessor MSc evaluation,
 extended with SOTA baselines for the journal-paper reformulation.
@@ -74,5 +123,6 @@ extended with SOTA baselines for the journal-paper reformulation.
 - Cosine-spaced ULA codebook, mobility tracks (rotation / straight line).
 - Simplified TR 38.901 GSCM, BPLM bookkeeping, six initial MBP policies.
 
-[Unreleased]: https://github.com/jakupsv/beamsim/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/jakupsv/beamsim/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/jakupsv/beamsim/releases/tag/v0.2.0
 [0.1.0]: https://github.com/jakupsv/beamsim/releases/tag/v0.1.0
