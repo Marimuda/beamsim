@@ -16,6 +16,10 @@ results/**/*.log
 results/**/*.txt
 !results/.gitkeep
 outputs/
+site/
+htmlcov/
+.coverage
+coverage.xml
 .DS_Store
 models/*.pt
 models/*.pth
