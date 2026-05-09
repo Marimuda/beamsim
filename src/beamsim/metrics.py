@@ -243,6 +243,204 @@ def outage_fraction(
     return (snr < threshold_db).mean(axis=1)
 
 
+def outage_probability(
+    snr_db: NDArray[np.float64],
+    threshold_db: float,
+) -> float:
+    """Population outage probability ``Pr(SNR_dB < threshold_db)``.
+
+    Pools across every trial and step in *snr_db* and returns a single
+    scalar in ``[0, 1]``.  For the per-trial breakdown, use
+    :func:`outage_fraction` and reduce at the call site.
+
+    The threshold is **strict**: a sample exactly at ``threshold_db`` is
+    *not* in outage, matching the convention of :func:`outage_fraction`
+    and :func:`coverage_rate` (which are complements at the boundary).
+
+    NaN samples propagate: if any element of *snr_db* is NaN the result
+    is NaN, on the principle that a population statistic over partially
+    missing data is itself undefined.  Use ``np.nan_to_num`` or filter
+    explicitly at the call site if you want to skip NaN.
+    """
+    snr = np.asarray(snr_db, dtype=np.float64)
+    if np.isnan(snr).any():
+        return float("nan")
+    return float(np.mean(snr < threshold_db))
+
+
+def beam_switch_rate(
+    obp_history: NDArray[np.int_],
+) -> NDArray[np.float64] | float:
+    """Fraction of consecutive step pairs at which the chosen beam pair changes.
+
+    Parameters
+    ----------
+    obp_history:
+        Either ``(n_steps, 2)`` for a single trial — returns a scalar — or
+        ``(n_trials, n_steps, 2)`` — returns a per-trial array of shape
+        ``(n_trials,)``.  Indices along the last axis are ``(k, l)``.
+
+    Returns
+    -------
+    Switch rate(s) in ``[0, 1]``: ``0`` means the algorithm never changed
+    its (k, l) selection, ``1`` means every step pair differed.  When
+    ``n_steps < 2`` the rate is defined as ``0`` (the algorithm could
+    not have switched).
+
+    Notes
+    -----
+    A "switch" is any change in *either* the UE index ``k`` or the BS
+    index ``l`` between consecutive steps.  Pool the per-trial array
+    with ``.mean()`` at the call site for the cross-trial mean.
+    """
+    arr = np.asarray(obp_history)
+    if arr.ndim == 2:
+        if arr.shape[1] != 2:
+            raise ValueError(
+                f"expected (n_steps, 2) or (n_trials, n_steps, 2), got shape {arr.shape}"
+            )
+        if arr.shape[0] < 2:
+            return 0.0
+        diffs = np.any(arr[1:] != arr[:-1], axis=-1)
+        return float(diffs.mean())
+    if arr.ndim == 3:
+        if arr.shape[2] != 2:
+            raise ValueError(
+                f"expected (n_steps, 2) or (n_trials, n_steps, 2), got shape {arr.shape}"
+            )
+        if arr.shape[1] < 2:
+            return np.zeros(arr.shape[0], dtype=np.float64)
+        diffs = np.any(arr[:, 1:] != arr[:, :-1], axis=-1)
+        return diffs.mean(axis=1).astype(np.float64)
+    raise ValueError(f"expected 2-D or 3-D obp_history, got shape {arr.shape}")
+
+
+def oracle_snr_db(
+    channel_matrices: NDArray[np.complex128],
+    ue_weights: NDArray[np.complex128],
+    bs_weights: NDArray[np.complex128],
+    noise_amplitude: float,
+    tx_amp: float = 1.0,
+) -> NDArray[np.float64]:
+    """Best achievable SNR (dB) over the *simulated codebook* at each step.
+
+    For each step ``t``, returns
+
+    .. math::
+
+        \\max_{k,l}\\;
+            10\\log_{10}\\!\\left(
+                \\frac{|\\,\\text{tx\\_amp}\\;\\bm w_k^H\\,\\bm H_t\\,\\bm f_l\\,|^2}
+                       {\\sigma_n^2}
+            \\right),
+
+    where ``w_k = ue_weights[k]`` is the UE combining vector and
+    ``f_l = bs_weights[l]`` is the BS precoding vector.  The combiner is
+    applied as ``w.conj() @ H @ f`` so the convention matches
+    :class:`beamsim.bplm.BPLMState.measure`.
+
+    Parameters
+    ----------
+    channel_matrices:
+        Per-step channel matrices, shape ``(n_steps, n_ue_elements,
+        n_bs_elements)``.  May also be a single ``(n_ue_elements,
+        n_bs_elements)`` matrix — the function adds a leading axis.
+    ue_weights:
+        UE codebook entries stacked as rows, shape ``(K, n_ue_elements)``.
+        For :class:`beamsim.codebook.Codebook` instances this is the
+        ``.matrix`` attribute.
+    bs_weights:
+        BS codebook entries stacked as rows, shape ``(L, n_bs_elements)``.
+    noise_amplitude:
+        ``sigma_n`` (amplitude, NOT power); the noise power is
+        ``sigma_n ** 2``.
+    tx_amp:
+        Transmit-amplitude calibration applied by the runner (defaults to
+        ``1.0`` to match :class:`beamsim.bplm.BPLMState`).
+
+    Returns
+    -------
+    Shape ``(n_steps,)`` of oracle SNR in dB.
+
+    Notes
+    -----
+    This is the *codebook* oracle: the strongest SNR a measurement-policy
+    algorithm could ever report given the same codebook and the same
+    channel realisation, evaluated **noiselessly**.  It is *not* a
+    Shannon-capacity oracle and *not* a deployable policy — it requires
+    measuring every (k, l) pair at every step, which defeats the point
+    of beam alignment.  Use it as the comparator in
+    :func:`snr_regret_db`.
+    """
+    H = np.asarray(channel_matrices, dtype=np.complex128)
+    if H.ndim == 2:
+        H = H[None, :, :]
+    if H.ndim != 3:
+        raise ValueError(
+            "expected channel_matrices of shape (n_steps, n_ue, n_bs) or (n_ue, n_bs); "
+            f"got shape {H.shape}"
+        )
+
+    W = np.asarray(ue_weights, dtype=np.complex128)
+    F = np.asarray(bs_weights, dtype=np.complex128)
+    if W.ndim != 2 or F.ndim != 2:
+        raise ValueError(
+            f"expected 2-D weight matrices; got ue_weights {W.shape}, bs_weights {F.shape}"
+        )
+    if W.shape[1] != H.shape[1]:
+        raise ValueError(
+            f"ue_weights last axis ({W.shape[1]}) must match n_ue_elements ({H.shape[1]})"
+        )
+    if F.shape[1] != H.shape[2]:
+        raise ValueError(
+            f"bs_weights last axis ({F.shape[1]}) must match n_bs_elements ({H.shape[2]})"
+        )
+
+    # Y[t, k, l] = tx_amp * conj(W[k]) @ H[t] @ F[l]
+    Y = tx_amp * np.einsum("ki,tij,lj->tkl", W.conj(), H, F)
+    sigma_sq = noise_amplitude**2
+    snr_lin = (np.abs(Y) ** 2) / sigma_sq
+    # Reduce over (k, l), then convert to dB with the same floor as output_snr_db.
+    best_per_step = snr_lin.reshape(snr_lin.shape[0], -1).max(axis=1)
+    return 10.0 * np.log10(np.maximum(best_per_step, 1e-10))
+
+
+def snr_regret_db(
+    achieved_snr_db: NDArray[np.float64],
+    oracle_snr_db: NDArray[np.float64],
+) -> NDArray[np.float64]:
+    """Per-step gap between codebook oracle SNR and achieved SNR (dB).
+
+    Sign convention::
+
+        snr_regret_db = oracle_snr_db - achieved_snr_db
+
+    so **lower is better and zero is optimal under the simulated codebook**.
+
+    By construction this is non-negative when both inputs come from the
+    same channel realisation and *achieved* uses the noiseless ideal
+    measurement; tiny negative values can appear once *achieved* is the
+    noisy SNR returned by :func:`output_snr_db`, because a favourable
+    noise realisation at the measured ``(k, l)`` can momentarily exceed
+    the noiseless oracle at the same step.  Treat negative values as
+    floor noise rather than as a bug.
+
+    Parameters
+    ----------
+    achieved_snr_db:
+        SNR-in-dB trace produced by an algorithm under test, any shape.
+    oracle_snr_db:
+        Oracle SNR trace, broadcastable to *achieved_snr_db*.
+
+    Returns
+    -------
+    Same shape as the broadcast of the two inputs.
+    """
+    a = np.asarray(achieved_snr_db, dtype=np.float64)
+    o = np.asarray(oracle_snr_db, dtype=np.float64)
+    return o - a
+
+
 def bootstrap_ci(
     samples: NDArray[np.float64],
     alpha: float = 0.05,
