@@ -75,6 +75,39 @@ that the existing `experiments/exp_*.py` scripts do not yet cover, plus
 a stable channel-state field name (the current `BlockageState` is
 already in `channel.py` but is not threaded through `_run_trial`).
 
+## MATLAB-parity remediation
+
+**Status:** deferred. See [`MATLAB_PARITY.md`](MATLAB_PARITY.md) for the
+full divergence audit against the original MATLAB simulator. The audit
+identified two classes of work:
+
+1. **Numerical / convention fixes** that do not change the algorithm's
+   semantic intent but bring the Python implementation closer to the
+   MATLAB code that produced the predecessor's figures. The most
+   important of these are:
+   - `mcmd.W_HIGH = (0.16, 0.36, 0.49)` differs from the MATLAB code's
+     normalised `W_High = (0.46, 0.13, 0.41)`. Switching would shift
+     every MCMD curve at high $w_t$.
+   - The two-slope vs single-slope path-loss model (~10 dB systematic
+     SNR offset at the 100 m reference distance).
+   - Tabu's tie-breaking circular distance (Python uses linear; MATLAB
+     uses circular).
+   - Tabu's cumulative penalty `T -= s` vs Python's absolute reset
+     `T = -s`.
+   - MCMD volatility / beam-quality window length and constants.
+2. **Bugs in the MATLAB original** that Python deliberately fixes
+   (Angular-Prediction filter, AgeMx tx/rx transposition, CI front/back
+   half-plane fold, rotation-track angular-unit confusion). These need
+   no action in Python; they are logged in `MATLAB_PARITY.md` so the
+   discrepancy with MATLAB-derived figures is traceable.
+
+**What would unblock it.** A decision on whether to anchor `beamsim`
+to *MATLAB code semantics* (changes Python figures, re-establishes
+parity with predecessor figures) or to *predecessor prose semantics*
+(keeps current figures, accepts that some MATLAB figures are
+artefacts of MATLAB bugs). The journal-paper revision currently takes
+the second position; closing this roadmap item requires the first.
+
 ## Optional: ray-traced channel adapter
 
 **Status:** speculative.
