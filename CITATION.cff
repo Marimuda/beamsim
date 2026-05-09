@@ -15,8 +15,8 @@ authors:
 version: "0.2.0"
 date-released: "2026-05-09"
 license: MIT
-repository-code: "https://github.com/jakupsv/beamsim"
-url: "https://github.com/jakupsv/beamsim"
+repository-code: "https://github.com/Marimuda/beamsim"
+url: "https://github.com/Marimuda/beamsim"
 keywords:
   - mmwave
   - beam-alignment

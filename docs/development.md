@@ -3,7 +3,7 @@
 ## Environment setup
 
 ```bash
-git clone https://github.com/jakupsv/beamsim.git
+git clone https://github.com/Marimuda/beamsim.git
 cd beamsim
 python -m venv .venv && source .venv/bin/activate
 make install        # editable install with [dev] extras
@@ -95,7 +95,7 @@ yet.
 - Update `CHANGELOG.md` under **Unreleased** for any user-visible change.
 - One logical change per PR. CI must be green before merge.
 
-See [`CONTRIBUTING.md`](https://github.com/jakupsv/beamsim/blob/main/CONTRIBUTING.md)
+See [`CONTRIBUTING.md`](https://github.com/Marimuda/beamsim/blob/main/CONTRIBUTING.md)
 for the contributor flow.
 
 ## Releasing (maintainers)

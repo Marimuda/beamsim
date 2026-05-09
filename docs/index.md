@@ -39,9 +39,9 @@ reformulation are locked, a `1.0.0` release will fix the contract.
 ## Citation
 
 If you use `beamsim` in published work, please cite it via the
-[`CITATION.cff`](https://github.com/jakupsv/beamsim/blob/main/CITATION.cff)
+[`CITATION.cff`](https://github.com/Marimuda/beamsim/blob/main/CITATION.cff)
 metadata or the GitHub "Cite this repository" button.
 
 ## License
 
-[MIT](https://github.com/jakupsv/beamsim/blob/main/LICENSE).
+[MIT](https://github.com/Marimuda/beamsim/blob/main/LICENSE).

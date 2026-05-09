@@ -1,8 +1,8 @@
 site_name: beamsim
 site_description: Geometry-based mmWave beam-alignment simulator reproducing the MCMD evaluation figures.
 site_author: jakupsv
-repo_url: https://github.com/jakupsv/beamsim
-repo_name: jakupsv/beamsim
+repo_url: https://github.com/Marimuda/beamsim
+repo_name: Marimuda/beamsim
 edit_uri: edit/main/docs/
 
 theme:

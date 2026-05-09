@@ -397,7 +397,7 @@ on first push to GitHub.**
 
 These last boxes can only be ticked once the repo is on GitHub:
 
-1. Push to `github.com/jakupsv/beamsim`, set the one-sentence GitHub
+1. Push to `github.com/Marimuda/beamsim`, set the one-sentence GitHub
    description, rename the default branch from `master` to `main`.
 2. Tag `v0.1.0` and create a GitHub Release — triggers Zenodo archival
    and DOI minting once the Zenodo–GitHub integration is enabled.

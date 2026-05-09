@@ -1,5 +1,5 @@
 blank_issues_enabled: false
 contact_links:
   - name: Security disclosure
-    url: https://github.com/jakupsv/beamsim/blob/main/SECURITY.md
+    url: https://github.com/Marimuda/beamsim/blob/main/SECURITY.md
     about: Please email jakupsv@setur.fo instead of opening a public issue.

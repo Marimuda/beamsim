@@ -7,7 +7,7 @@ but external pull requests are welcome.
 ## Quick start
 
 ```bash
-git clone https://github.com/jakupsv/beamsim.git
+git clone https://github.com/Marimuda/beamsim.git
 cd beamsim
 python -m venv .venv && source .venv/bin/activate
 make install      # installs the package + dev extras (test, docs, lint, type)

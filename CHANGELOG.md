@@ -123,6 +123,6 @@ extended with SOTA baselines for the journal-paper reformulation.
 - Cosine-spaced ULA codebook, mobility tracks (rotation / straight line).
 - Simplified TR 38.901 GSCM, BPLM bookkeeping, six initial MBP policies.
 
-[Unreleased]: https://github.com/jakupsv/beamsim/compare/v0.2.0...HEAD
-[0.2.0]: https://github.com/jakupsv/beamsim/releases/tag/v0.2.0
-[0.1.0]: https://github.com/jakupsv/beamsim/releases/tag/v0.1.0
+[Unreleased]: https://github.com/Marimuda/beamsim/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.2.0
+[0.1.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.1.0

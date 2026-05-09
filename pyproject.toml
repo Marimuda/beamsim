@@ -63,10 +63,10 @@ dev = [
 ]
 
 [project.urls]
-Homepage = "https://github.com/jakupsv/beamsim"
-Repository = "https://github.com/jakupsv/beamsim"
-Issues = "https://github.com/jakupsv/beamsim/issues"
-Changelog = "https://github.com/jakupsv/beamsim/blob/main/CHANGELOG.md"
+Homepage = "https://github.com/Marimuda/beamsim"
+Repository = "https://github.com/Marimuda/beamsim"
+Issues = "https://github.com/Marimuda/beamsim/issues"
+Changelog = "https://github.com/Marimuda/beamsim/blob/main/CHANGELOG.md"
 
 [project.scripts]
 beamsim-run = "beamsim.run:main"

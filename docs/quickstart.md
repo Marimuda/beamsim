@@ -77,7 +77,7 @@ save_experiment(result, Path("outputs/rotational_small.npz"))
 ```
 
 For a runnable version of the same script see
-[`examples/minimal_example.py`](https://github.com/jakupsv/beamsim/blob/main/examples/minimal_example.py).
+[`examples/minimal_example.py`](https://github.com/Marimuda/beamsim/blob/main/examples/minimal_example.py).
 
 ## 4. Browse the figures
 

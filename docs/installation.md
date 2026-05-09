@@ -9,7 +9,7 @@
 ## From source (recommended for development)
 
 ```bash
-git clone https://github.com/jakupsv/beamsim.git
+git clone https://github.com/Marimuda/beamsim.git
 cd beamsim
 python -m venv .venv && source .venv/bin/activate
 pip install -e ".[dev]"
