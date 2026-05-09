@@ -7,6 +7,66 @@ public surface is still pre-1.0 — minor versions may break API.
 
 ## [Unreleased]
 
+## [0.3.0] — 2026-05-09
+
+Minor release: closes the largest gaps from the MATLAB-parity audit
+(`docs/MATLAB_PARITY.md`) by porting four standalone algorithms and
+adding Uniform Planar Array support — the original MATLAB simulator
+exposed all of these but the Python re-implementation did not.
+
+### Added
+
+- `algorithms/agemx.py` (`AgeMx`) — standalone least-recently-measured
+  beam-pair scan, formerly only available as MCMD's age criterion.
+- `algorithms/random_search.py` (`RandomSearch`) — randperm-then-mark
+  scan baseline, RNG seeded from `context["trial_seed"]`.
+- `algorithms/nns_tabu.py` (`NNSTabu`) — NNS-with-tabu (Ascent_Tabu),
+  the algorithm MCMD's slot-7 weight (`W_High[7] = 0.8742` in the
+  MATLAB simulator) actually points at; distinct from plain NNS by
+  using the GLOBAL argmax of `|Y_obs|` for relocation when the
+  five-cell list is exhausted.
+- `algorithms/ci_mbs.py` (`ContextInformationMBS`) — multi-BS CI,
+  picks the closest BS by L2 distance then runs the standard
+  sin-space CI match in that BS's frame.
+- `codebook.PlanarCodebook` + `codebook.planar_steering_vector` —
+  Uniform Planar Array codebook (n_x × n_y elements in xy-plane at
+  half-wavelength spacing, azimuth-only steering uniform over
+  `[0, 2π)`). Mirrors MATLAB `placodebook.m`.
+- `channel.PlanarFreeSpaceLosChannel` — companion LOS channel for
+  end-to-end UPA experiments; works with `BPLMState` via the same
+  `w.conj() @ H @ f` contract as the ULA channel.
+- `make_default_planar_ue_codebook` (2×2 UPA, 6 beams) and
+  `make_default_planar_bs_codebook` (4×4 UPA, 12 beams) factories.
+- 28 new tests (`tests/test_matlab_ports.py`,
+  `tests/test_planar_codebook.py`).
+
+### Changed
+
+- `BPLMState.ue_codebook` and `BPLMState.bs_codebook` type annotations
+  widened to `Codebook | PlanarCodebook` so mypy recognises the
+  polymorphism (no runtime change — both types already exposed the
+  required `n_beams` and `codeword(k)` interface).
+- `beamsim.__all__` extended with `PlanarCodebook` and
+  `PlanarFreeSpaceLosChannel`; `tests/test_packaging.py`'s
+  expected-public-API set updated to match.
+- `docs/MATLAB_PARITY.md` updated to mark the resolved entries; the
+  full TR 38.901 cluster channel (`ChannelRealisation`) still uses
+  ULA steering internally and is tracked under
+  [`docs/ROADMAP.md`](docs/ROADMAP.md) for a future UPA extension.
+
+### Note on library choice
+
+The planar steering implementation is hand-rolled numpy. The mature
+candidates (NVIDIA Sionna, DeepMIMO) are at least an order of
+magnitude heavier than the codebook layer alone needs, and DeepMIMO
+is the natural integration only at the channel layer when ray-traced
+channels are added. Both are kept on the roadmap rather than imported
+as required dependencies.
+
+### Test count
+
+216 → 248 passing.
+
 ## [0.2.1] — 2026-05-09
 
 Patch release: codebook-oracle SNR is now computed for single-BS experiments,
@@ -155,7 +215,8 @@ extended with SOTA baselines for the journal-paper reformulation.
 - Cosine-spaced ULA codebook, mobility tracks (rotation / straight line).
 - Simplified TR 38.901 GSCM, BPLM bookkeeping, six initial MBP policies.
 
-[Unreleased]: https://github.com/Marimuda/beamsim/compare/v0.2.1...HEAD
+[Unreleased]: https://github.com/Marimuda/beamsim/compare/v0.3.0...HEAD
+[0.3.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.3.0
 [0.2.1]: https://github.com/Marimuda/beamsim/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.2.0
 [0.1.0]: https://github.com/Marimuda/beamsim/releases/tag/v0.1.0
