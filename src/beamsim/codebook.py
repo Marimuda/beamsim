@@ -119,6 +119,34 @@ class PlanarCodebook:
     difference is the sampling: ULA codebooks sample uniformly in
     ``sin(theta)`` over ``(-1, 1)``; planar codebooks sample uniformly
     in azimuth over ``[0, 2*pi)``.
+
+    Scope: this is the canonical far-field UPA steering-vector codebook
+    used in algorithmic beam-selection studies. It is a controlled
+    finite action space, not a research contribution in itself: the
+    "state of the art" lives a layer up (beam prediction, regret-style
+    evaluation, environment-aware codebooks, ML-assisted search). The
+    implementation is deliberately a transparent, auditable, dependency-
+    light vectorised numpy reading of the array-processing primitive.
+
+    Assumptions
+    -----------
+    - Far-field propagation (wavefronts planar across the aperture).
+    - Narrowband signal model (no beam squint across bandwidth).
+    - Uniform rectangular geometry with ideal half-wavelength spacing.
+    - Ideal isotropic / simplified element pattern (no detailed
+      radiation pattern).
+    - No mutual coupling between elements.
+    - Ideal continuous phase control (no phase-shifter quantisation).
+    - Single (scalar) polarisation; no polarisation rotation matrix.
+    - No near-field focusing (beams steer by angle, not by range).
+
+    These match the standard abstractions in mmWave and massive-MIMO
+    beam-selection studies. They become wrong only if a paper claims
+    full electromagnetic antenna realism, hardware-valid RF behaviour,
+    or deployment-grade propagation fidelity --- none of which the
+    accompanying paper claims. More realistic channels (DeepMIMO ray
+    tracing, Sionna RT) plug in at the channel layer rather than the
+    codebook layer; see ``docs/ROADMAP.md`` for the deferred adapter.
     """
 
     n_x: int

@@ -171,12 +171,17 @@ as one of:
   `obp()` global relocation. Both are valid local hill-climbers; they
   produce different probe sequences when the global OBP lies outside
   the recently-probed neighbourhood.
-- **NNS-with-tabu (Ascent_Tabu) is missing in Python.** MATLAB
-  distinguishes `updateAscentmx.m` (NNS without tabu) from
-  `updateAscentmx_Tabu.m` (NNS with tabu, with global-search relocation
-  when the probe list empties). Python collapses both into a single
-  `nns.py`. MCMD's weight slot 7 (`C_Ascent_Tabu` in MATLAB) maps to
-  plain NNS in the Python implementation.
+- ~~**NNS-with-tabu (Ascent_Tabu) is missing in Python.**~~ **Resolved
+  in v0.3.0** by `algorithms/nns_tabu.py` (`NNSTabu`), which mirrors
+  `updateAscentmx_Tabu.m` exactly: five-cell explicit list (centre + 4
+  cardinal neighbours at offset 2 with circular wrap-around) and
+  **global** argmax of `|Y_obs|` for relocation when the list is
+  exhausted, distinct from plain NNS's list-only relocation. MCMD's
+  internal NNS criterion still maps to plain NNS rather than to
+  Ascent_Tabu — switching MCMD's slot to use NNSTabu remains tracked
+  separately (see [`ROADMAP.md`](ROADMAP.md) under "MATLAB-parity
+  remediation"), since that change would shift the published MCMD
+  curves at high mobility.
 - **Tabu cumulative penalty.** MATLAB does `T[k,l] -= s` (additive,
   cumulative); Python does `T[k,l] = -s` (absolute reset). Behaviour
   diverges only for cells that are revisited while still tabu, which is
@@ -247,6 +252,59 @@ predecessor intended.
   *generated* the predecessor's MCMD figures. Code-level remediation
   is deferred to [`ROADMAP.md`](ROADMAP.md) because changing
   `W_HIGH` would shift the MCMD curves in every published figure.
+
+## Scope of the planar (UPA) codebook
+
+The Python `PlanarCodebook` is a **canonical far-field UPA steering-vector
+codebook**, intentionally implemented as ~30 lines of vectorised numpy
+to mirror MATLAB `placodebook.m`. This is the standard finite action
+space used in algorithmic beam-selection studies; it is not itself a
+research contribution.
+
+**State of the art does not live here.** It lives a layer up: ML-assisted
+beam prediction, multi-resolution / hierarchical / learned codebooks,
+position-aided contextual search, environment-aware adaptation, ray-
+traced channel generalisation. `PlanarCodebook` is a transparent,
+dependency-light primitive against which those higher-layer methods can
+be evaluated.
+
+**Assumptions made by the planar primitive.** Far-field propagation;
+narrowband signal model (no beam squint); ideal half-wavelength
+rectangular geometry; isotropic / simplified element pattern; no mutual
+coupling; ideal continuous phase control (no quantisation); single
+scalar polarisation; no near-field focusing. These are standard for
+mmWave / massive-MIMO beam-selection work and become wrong only when
+the surrounding paper claims full EM antenna realism, hardware-valid
+RF behaviour, or deployment-grade propagation fidelity. The
+accompanying paper claims none of these.
+
+**Mature alternative libraries.** NVIDIA Sionna RT (GPU-accelerated
+differentiable ray tracer, TensorFlow-based) and DeepMIMO (ray-traced
+mmWave/massive-MIMO dataset framework, arXiv:1902.06435) are the
+relevant mature options if/when richer channels are needed. Both are at
+least an order of magnitude heavier than a UPA codebook needs and slot
+in at the **channel layer**, not as a replacement for the codebook
+primitive. Adding a DeepMIMO adapter is tracked in
+[`ROADMAP.md`](ROADMAP.md) as the "ray-traced channel adapter" entry.
+
+## Standalone components ported to Python (v0.3.0)
+
+The original audit listed several MATLAB simulator modules with no Python
+equivalent. These were ported in v0.3.0:
+
+- `algorithms/agemx.py` (`AgeMx`) — standalone least-recently-measured
+  scan, exposing the age criterion as an MBP policy independent of MCMD.
+- `algorithms/random_search.py` (`RandomSearch`) — `randperm`-then-mark
+  scan baseline, RNG seeded from `context["trial_seed"]`.
+- `algorithms/nns_tabu.py` (`NNSTabu`) — Ascent_Tabu (see entry above).
+- `algorithms/ci_mbs.py` (`ContextInformationMBS`) — closest-BS-aware CI,
+  with the same sin-space match as the single-BS CI.
+- `codebook.PlanarCodebook` + `channel.PlanarFreeSpaceLosChannel` —
+  Uniform Planar Array (UPA) codebook and companion LOS channel,
+  matching the MATLAB `placodebook.m` convention. Closes the "ULA only"
+  qualifier from the original audit. The full TR 38.901 cluster channel
+  (`ChannelRealisation`) still uses ULA steering internally; extending
+  it to UPA is tracked in [`ROADMAP.md`](ROADMAP.md).
 
 ## Severity ranking (top 5)
 
