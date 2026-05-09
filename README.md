@@ -6,10 +6,19 @@
 [![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
 [![Type-checked: mypy](https://img.shields.io/badge/types-mypy-2a6db2.svg)](https://mypy-lang.org/)
 
-Geometry-based mmWave beam-alignment simulator that reproduces the four
-figures of the journal-paper reformulation of the predecessor MSc work
-*Beam alignment methods for terminals in millimeter-wave wireless networks*
-(Aalborg, 2018).
+`beamsim` provides a reproducible implementation of geometry-based mmWave
+beam-alignment simulation and baseline comparison, grounded in the original
+MSc thesis model (*Beam alignment methods for terminals in millimeter-wave
+wireless networks*, Aalborg, 2018) and extended with modern reproducibility
+and evaluation practices.
+
+The repository is positioned within the broader **beam-management** problem
+that 5G NR / 5G-Advanced has crystallised — see
+[`docs/related_work.md`](docs/related_work.md) for how the field has evolved
+from 2018-era beam alignment to the modern beam-management lifecycle, what
+this simulator does cover, and what is deliberately out of scope (RIS,
+near-field / sub-THz focusing, multi-TRP coordination, multimodal sensing,
+ray-traced or measured channels).
 
 ## Status
 
@@ -22,18 +31,36 @@ Researchers and graduate students working on mmWave beam management who want
 a small, reproducible, well-typed reference implementation of NNS, tabu,
 angular-prediction, context-information, and MCMD policies — plus modern
 SOTA baselines (Thompson, UCB1, HBM, OMP, DL-MLP, DL-LSTM, MAMBA, EKF,
-PositionMAB, BAI) — under a faithful TR 38.901 cluster-delay-line channel.
+PositionMAB, BAI) — under a faithful TR 38.901 cluster-delay-line channel,
+all paired across algorithms by common random numbers for statistically
+meaningful comparison.
 
 ## Scope
 
-- 28 GHz, 100 MHz bandwidth, UMi (default) / UMa (selected runs).
+This is a **codebook-based beam-alignment simulator with mobility, blockage,
+and reproducible baseline comparison**. It covers:
+
+- 28 GHz, 100 MHz bandwidth, UMi (default) / UMa (selected runs);
 - ULA: 4-element UE / 16-element BS, cosine-spaced linear-phase codebooks
-  of size 8 and 32.
-- Azimuth-only, single polarisation, no random ray-coupling.
+  of size 8 and 32;
+- azimuth-only, single polarisation, no random ray-coupling;
 - 3GPP TR 38.901 cluster-delay-line generator simplified to 12 clusters /
-  20 sub-rays per cluster, LOS, without spatial-consistency procedure.
-- Algorithms: exhaustive, NNS, tabu (with aspiration), angular prediction,
-  context information, MCMD, and the SOTA baselines listed above.
+  20 sub-rays per cluster, LOS, without spatial-consistency procedure;
+- mobility tracks (rotation, straight-line) and Model A blockage;
+- single-BS and multi-BS handover scenarios;
+- common-random-numbers Monte Carlo orchestration (`runner.py`) so each
+  algorithm sees an identical channel/noise sequence per trial;
+- 3GPP TR 38.843–aligned beam-management metrics where applicable (Phase 4C);
+- algorithm zoo: exhaustive, NNS, tabu (with aspiration), angular
+  prediction, context information, MCMD, plus the SOTA baselines listed
+  above (see [`docs/SOTA_BASELINES.md`](docs/SOTA_BASELINES.md)).
+
+It deliberately does **not** cover RIS, near-field / sub-THz beam focusing,
+multi-TRP joint transmission, multimodal sensing (camera / LiDAR / radar),
+ray-traced or measured channels, or the full 3GPP beam-failure-recovery and
+measurement-reporting signalling pipeline.
+[`docs/related_work.md`](docs/related_work.md) explains why and points at
+the projects that do.
 
 ## Supported environments
 
@@ -135,6 +162,8 @@ or read the sources directly:
 - [Architecture](docs/architecture.md)
 - [Development guide](docs/development.md)
 - [SOTA baselines reference card](docs/SOTA_BASELINES.md)
+- [Related work](docs/related_work.md) — where `beamsim` sits in the modern
+  beam-management literature
 - [API reference](docs/api.md) (auto-generated via mkdocstrings)
 
 ## Citation
