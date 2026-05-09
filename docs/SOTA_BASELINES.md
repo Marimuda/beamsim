@@ -30,7 +30,7 @@ so multi-trial Monte Carlo is reproducible).
 | `AngularPrediction` | `angular_prediction.py` | Predecessor thesis Algorithm 3 (gradient-sum). |
 | `ContextInformation` | `ci.py` | Predecessor thesis context-aided beam selection. |
 | `MCMD` | `mcmd.py` | The thesis's main contribution. |
-| `Perfect` | `perfect.py` | Reads `context["true_H"]`; oracle upper bound. |
+| `Perfect` | `perfect.py` | Reads `context["true_H"]`; **codebook** oracle upper bound (not Shannon). |
 | `UCB1` | `ucb1.py` | Auer, Cesa-Bianchi, Fischer 2002 — **stationary, sanity-check only**. |
 | `ThompsonGaussian` | `thompson.py` | Chapelle & Li 2011 — **stationary, sanity-check only**. |
 | `HBM` | `hbm.py` | Giordani et al. COMST 2019 (3GPP NR P1/P2). |

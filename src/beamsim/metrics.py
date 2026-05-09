@@ -247,15 +247,22 @@ def outage_probability(
     snr_db: NDArray[np.float64],
     threshold_db: float,
 ) -> float:
-    """Population outage probability ``Pr(SNR_dB < threshold_db)``.
+    """Population outage probability.
+
+    Defined with a **strict** inequality::
+
+        outage_probability = Pr(SNR_dB < threshold_db)
+
+    A sample exactly at ``threshold_db`` is therefore *not* in outage —
+    this matches :func:`outage_fraction` and is the boundary complement
+    of :func:`coverage_rate` (so pooled outage + pooled coverage at the
+    same threshold sum to exactly 1).  The strictness matters for
+    deterministic tests where SNR can equal the threshold by
+    construction.
 
     Pools across every trial and step in *snr_db* and returns a single
     scalar in ``[0, 1]``.  For the per-trial breakdown, use
     :func:`outage_fraction` and reduce at the call site.
-
-    The threshold is **strict**: a sample exactly at ``threshold_db`` is
-    *not* in outage, matching the convention of :func:`outage_fraction`
-    and :func:`coverage_rate` (which are complements at the boundary).
 
     NaN samples propagate: if any element of *snr_db* is NaN the result
     is NaN, on the principle that a population statistic over partially
@@ -273,6 +280,15 @@ def beam_switch_rate(
 ) -> NDArray[np.float64] | float:
     """Fraction of consecutive step pairs at which the chosen beam pair changes.
 
+    The denominator is **explicitly ``n_steps - 1``** (the number of
+    consecutive step pairs), so the rate is
+
+    .. math::
+
+        \\frac{\\#\\,\\{\\,t \\in \\{1,\\dots,n_{\\text{steps}}-1\\}
+                       :\\;(k_t, l_t) \\neq (k_{t-1}, l_{t-1})\\,\\}}
+              {n_{\\text{steps}} - 1}.
+
     Parameters
     ----------
     obp_history:
@@ -282,10 +298,15 @@ def beam_switch_rate(
 
     Returns
     -------
-    Switch rate(s) in ``[0, 1]``: ``0`` means the algorithm never changed
-    its (k, l) selection, ``1`` means every step pair differed.  When
-    ``n_steps < 2`` the rate is defined as ``0`` (the algorithm could
-    not have switched).
+    Switch rate(s) in ``[0, 1]``: ``0`` means the algorithm never
+    changed its (k, l) selection, ``1`` means every consecutive pair
+    differed.
+
+    When ``n_steps < 2`` the rate is defined as ``0.0`` rather than
+    ``NaN`` on the rationale that *no transition opportunities implies
+    no switches*: a single-step trace cannot evidence churn.  If you
+    need to distinguish "no switching" from "no opportunity to switch",
+    inspect the trace shape directly.
 
     Notes
     -----
@@ -322,7 +343,8 @@ def oracle_snr_db(
     noise_amplitude: float,
     tx_amp: float = 1.0,
 ) -> NDArray[np.float64]:
-    """Best achievable SNR (dB) over the *simulated codebook* at each step.
+    """Best achievable SNR (dB) over the *simulated finite UE × BS codebook*
+    for the same channel realisation, evaluated at each step.
 
     For each step ``t``, returns
 
@@ -409,13 +431,24 @@ def snr_regret_db(
     achieved_snr_db: NDArray[np.float64],
     oracle_snr_db: NDArray[np.float64],
 ) -> NDArray[np.float64]:
-    """Per-step gap between codebook oracle SNR and achieved SNR (dB).
+    """Per-step **additive dB gap** between codebook-oracle SNR and achieved SNR.
 
     Sign convention::
 
         snr_regret_db = oracle_snr_db - achieved_snr_db
 
     so **lower is better and zero is optimal under the simulated codebook**.
+
+    This is an **additive gap in the dB domain**, not a regret functional
+    in linear utility / power space::
+
+        regret_dB(t) = 10·log10(SNR_oracle(t) / SNR_achieved(t))
+
+    not ``SNR_oracle(t) - SNR_achieved(t)`` in linear units.  In
+    particular, "5 dB regret" means *the achieved SNR is 5 dB below the
+    codebook ceiling at this step*, regardless of how high the absolute
+    oracle SNR is.  If you want a linear-power regret, exponentiate
+    both sides yourself before subtracting.
 
     By construction this is non-negative when both inputs come from the
     same channel realisation and *achieved* uses the noiseless ideal
@@ -430,11 +463,12 @@ def snr_regret_db(
     achieved_snr_db:
         SNR-in-dB trace produced by an algorithm under test, any shape.
     oracle_snr_db:
-        Oracle SNR trace, broadcastable to *achieved_snr_db*.
+        Codebook-oracle SNR trace from :func:`oracle_snr_db`,
+        broadcastable to *achieved_snr_db*.
 
     Returns
     -------
-    Same shape as the broadcast of the two inputs.
+    Same shape as the broadcast of the two inputs, in dB.
     """
     a = np.asarray(achieved_snr_db, dtype=np.float64)
     o = np.asarray(oracle_snr_db, dtype=np.float64)

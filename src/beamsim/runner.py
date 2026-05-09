@@ -170,7 +170,9 @@ def _run_trial(
     snr_db_best_out: dict[str, NDArray[np.float64]] | None = (
         {a: np.zeros(experiment.n_steps) for a in experiment.algorithms} if multi_bs else None
     )
-    # True oracle: max over all (BS, k, l) of noiseless post-beamforming SNR.
+    # Codebook oracle: max over all (BS, k, l) of noiseless post-beamforming
+    # SNR, i.e. the strongest SNR achievable on the *simulated finite UE×BS
+    # codebook* given the same channel realisation. Not Shannon capacity.
     snr_oracle_out: NDArray[np.float64] | None = np.zeros(experiment.n_steps) if multi_bs else None
 
     # Pre-build full codebook matrices for vectorised oracle computation.

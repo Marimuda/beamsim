@@ -1,9 +1,13 @@
-"""Perfect-knowledge baseline: noiseless oracle that always picks the true OBP.
+"""Perfect-knowledge baseline: noiseless codebook oracle.
 
 This algorithm has zero measurement cost — it reads the noise-free channel
 matrix ``H`` injected into ``context["true_H"]`` by the runner and returns
-the (k, l) that maximises |w_k^H H f_l| over the full codebook product.
-It is a reference upper bound, not a practical algorithm.
+the (k, l) that maximises ``|w_k^H H f_l|`` over the full UE × BS codebook
+product. It is the *codebook* oracle: the strongest SNR an algorithm could
+ever report on the simulated finite codebook for the same channel
+realisation. It is **not** a Shannon-capacity oracle and **not** a
+deployable policy — it is a reference upper bound for diagnostic plots
+only.
 """
 
 from __future__ import annotations
@@ -15,7 +19,7 @@ from beamsim.bplm import BPLMState
 
 
 class Perfect(Algorithm):
-    """Oracle baseline: argmax of noiseless beam-gain over all (k, l)."""
+    """Codebook-oracle baseline: argmax of noiseless beam-gain over all (k, l)."""
 
     name = "perfect"
 
