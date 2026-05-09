@@ -81,17 +81,34 @@ as one of:
   treats implicitly". The audit confirms that MATLAB `updateCI.m` collapses
   the front/back half-plane via `abs(atan2(...))` and Python is the more
   faithful interpretation of the predecessor's *intent*.
-- **MCMD endpoint weights from Fig.~5.26.** Paper says "reproduced from
-  the predecessor's evolutionary-search output (its Fig.~5.26)". *Caveat:*
-  the MATLAB simulator code committed `W_High = [0.9742, 0, 0.2733, 0, 0,
-  0, 0.8742]` (normalised active-three: $(0.46, 0.13, 0.41)$) whereas the
-  paper reports $(0.16, 0.36, 0.49)$. The two endpoints disagree even
-  before Python's mapping enters the picture; either Fig.~5.26's
-  pie-chart values were re-fitted between the figure and the simulator
-  commit, or one of the two readings is wrong. The Python implementation
-  uses the paper's published values, so changing it to match
-  the MATLAB code would invalidate the existing MCMD figures. See
-  Sec.~4.4 for the disclosure.
+- **MCMD endpoint weights from Fig.~5.26 — Python is thesis-faithful.**
+  The predecessor's MSc thesis (`report/report_Final.txt`, line 4486)
+  publishes Fig.~5.26 as two pie charts:
+    - 3 m/s: Exhaustive 43%, Tabu 52%, NNS 5%
+    - 10 m/s: Exhaustive 16%, Tabu 36%, NNS 49%
+  Python's `W_LOW = (0.43, 0.52, 0.05)` and `W_HIGH = (0.16, 0.36, 0.49)`
+  are these values **exactly**. The MATLAB simulator commit-time
+  `W_High = [0.9742, 0, 0.2733, 0, 0, 0, 0.8742]` (active-three
+  normalised to $(0.46, 0.13, 0.41)$) is a *different* evolutionary
+  search run from a later snapshot of the simulator — Algorithm 7 in
+  the thesis (line 4392) uses `wb ← randn(Nw)` initialisation and
+  stochastic mutation, so re-runs produce different terminal weights.
+  Python is therefore faithful to the published thesis figure;
+  MATLAB's later run is an internally-consistent re-fit that was not
+  reflected back into the thesis text. **No change needed.**
+
+- **MCMD criterion structure: 3-criterion (Python, thesis) vs 4-criterion
+  (MATLAB code).** The thesis text at line 4415 says: "criteria matrices:
+  Age matrix, NNS and Tabu. Those three matrices were chosen as the age
+  matrix implements a beam-search, and NNS matrix and tabu matrix
+  together implement the tabu-search tracking." Python's MCMD sums three
+  criteria (age, tabu, NNS) per the thesis design; MATLAB's MCMD adds a
+  fourth `Ascent_Tabu` (NNS-with-tabu) criterion in slot 7 and weighs
+  the original NNS slot 2 to zero. This is again a later-snapshot
+  revision in the MATLAB simulator that did not land in the thesis. The
+  standalone `NNSTabu` algorithm shipped in v0.3.0 makes Ascent_Tabu
+  available as a comparator, but MCMD's internal criteria structure
+  remains the thesis-faithful three-way sum. **No change needed.**
 
 ### Undocumented divergences (this audit's net-new findings)
 
@@ -240,18 +257,10 @@ predecessor intended.
 
 ### Bugs in Python (MATLAB is the correct reference)
 
-- **MCMD `W_HIGH` numerical mismatch.** Python `mcmd.W_HIGH = (0.16, 0.36, 0.49)`
-  (over the active criteria order age, tabu, NNS), while the MATLAB
-  simulator commit-time value `W_High = [0.9742, 0, 0.2733, 0, 0, 0,
-  0.8742]` normalises to $(0.46, 0.13, 0.41)$ over (age, tabu,
-  ascent_tabu). The two are inconsistent in *both* the numerical values
-  and the algorithm in slot 3 (Python's NNS vs MATLAB's
-  Ascent_Tabu). Whichever is closer to the predecessor's Fig.~5.26
-  intent is unclear without the lost training run; the Python value
-  is what the paper currently reports, the MATLAB code is what
-  *generated* the predecessor's MCMD figures. Code-level remediation
-  is deferred to [`ROADMAP.md`](ROADMAP.md) because changing
-  `W_HIGH` would shift the MCMD curves in every published figure.
+*(Empty after the v0.3.0 audit and the W_HIGH / MCMD-slot-7 investigation
+moved both items into the "documented divergences" category — see the
+two paragraphs above. Python is thesis-faithful in every case; the
+MATLAB code's deviations are later un-published revisions.)*
 
 ## Scope of the planar (UPA) codebook
 
@@ -308,25 +317,28 @@ equivalent. These were ported in v0.3.0:
 
 ## Severity ranking (top 5)
 
-1. **MCMD `W_HIGH` mismatch** — different numerical weights *and* a
-   different criterion in the third slot. Affects every MCMD curve at
-   $w_t \to 1$ (high mobility, the regime where MCMD is supposed to
-   shine).
-2. **Two-slope vs single-slope path loss** — $\sim$10 dB systematic
+1. **Two-slope vs single-slope path loss** — $\sim$10 dB systematic
    offset between MATLAB and Python at the IBS$/2 = 100$ m reference
-   distance. Means the SNR-axis values in Python figures cannot be
-   read off as if they were the MATLAB-equivalent SNR-axis values.
-3. **Self-blocker 0 dB (MATLAB) vs 30 dB (Python)** — Python correctly
-   implements the predecessor's specified Model A; MATLAB had it
-   commented out. The two implementations therefore agree with the
-   *prose* and disagree with the *figures*. Resolving requires either
-   re-running MATLAB with the self-blocker re-enabled or documenting
-   the discrepancy.
-4. **Cluster delay distribution** — uniform vs exponential. Python is
-   standards-conformant; MATLAB is the predecessor's working
-   configuration. Magnitude of impact is the tail of the delay
-   profile.
-5. **Angular Prediction filter bug in MATLAB** — the predecessor's
+   distance. The MATLAB `PL_3gpp.m` header comment "BP calcs not
+   included due to limited distances in model" makes this an
+   intentional MATLAB simplification; Python applies the full
+   TR 38.901 two-slope model. Means the SNR-axis values in Python
+   figures cannot be read off as if they were the MATLAB-equivalent
+   SNR-axis values.
+2. **Self-blocker 0 dB (MATLAB code) vs 30 dB (predecessor prose,
+   Python).** MATLAB `blockage.m:31` keeps the self-blocker line at
+   `attenuation = 0` with the 30 dB version commented out one line
+   above. Python implements the predecessor's specified Model A
+   (Sec.~3.2.4, Eq.~3.15: 30 dB flat over a 120° back-of-body cone).
+   The two implementations therefore agree with the *prose* and
+   disagree with the *figures*; Python is the more thesis-faithful
+   reference here.
+3. **Cluster delay distribution** — uniform with matched variance
+   (MATLAB) vs TR 38.901 §7.5 Step 5 exponential (Python). Both have
+   the same mean and variance ($2\sqrt{3}\,\mathrm{DS}$ uniform width
+   matches the exponential's standard deviation), so headline
+   statistics agree; only the tail of the delay profile differs.
+4. **Angular Prediction filter bug in MATLAB** — the predecessor's
    AngPred figures are produced by what is effectively a
    one-step-history null filter rather than the gradient-sum
    predictor described in Algorithm 3. Python implements the spec
@@ -334,6 +346,20 @@ equivalent. These were ported in v0.3.0:
    LOS smooth motion, fails in multipath") still holds, but the
    quantitative MATLAB curves are what an *unfiltered* predictor
    produces.
+5. **KED `lambda_eff`** — Python originally hardcoded `0.4` with no
+   physical motivation; MATLAB uses the wavelength times the blocker
+   radius, a Fresnel-zone-like length scale (~28 at 28 GHz with a
+   10 m blocker). Resolved in **v0.3.1** (`fix(channel)`); Python now
+   computes `lambda_eff = (c / fc_hz) * blocker_radius_m` per the
+   MATLAB physical formula.
+
+> **Resolved during the audit-followup investigation (v0.3.1):**
+> The `W_HIGH` numerical mismatch and the MCMD slot-7 / NNSTabu
+> structural divergence both turned out to be cases where Python is
+> *thesis-faithful* and the MATLAB code is a later un-published
+> re-fit. See the corresponding entries in the Documented
+> Divergences section. No code change was made to MCMD, since the
+> Python implementation was already correct.
 
 ## How to read the paper alongside this document
 
