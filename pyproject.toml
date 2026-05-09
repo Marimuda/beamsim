@@ -5,10 +5,27 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "beamsim"
 version = "0.1.0"
-description = "Geometry-based mmWave beam-alignment simulator for the MCMD evaluation"
+description = "Geometry-based mmWave beam-alignment simulator reproducing the MCMD evaluation figures"
+readme = "README.md"
+license = { file = "LICENSE" }
 requires-python = ">=3.10"
 authors = [
-    { name = "MCMD evaluation reproduction" }
+    { name = "jakupsv", email = "jakupsv@setur.fo" }
+]
+keywords = ["mmwave", "beam-alignment", "5G", "3GPP TR 38.901", "simulation", "reproducibility"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Intended Audience :: Science/Research",
+    "License :: OSI Approved :: MIT License",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering",
+    "Topic :: Scientific/Engineering :: Information Analysis",
+    "Typing :: Typed",
 ]
 dependencies = [
     "numpy>=1.24",
@@ -25,15 +42,31 @@ dl = [
     "torch>=2.2",
     "tqdm>=4.65",
 ]
-dev = [
+test = [
     "pytest>=7",
     "pytest-xdist",
-    "ruff>=0.5",
-    "mypy>=1.10",
-    "hypothesis>=6.100",
     "pytest-benchmark>=4",
-    "pre-commit>=3.7",
+    "pytest-cov>=5",
+    "hypothesis>=6.100",
 ]
+docs = [
+    "mkdocs>=1.6",
+    "mkdocs-material>=9.5",
+    "mkdocstrings[python]>=0.25",
+]
+dev = [
+    "beamsim[test,docs]",
+    "ruff>=0.15",
+    "mypy>=1.10",
+    "pre-commit>=3.7",
+    "build>=1.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/jakupsv/beamsim"
+Repository = "https://github.com/jakupsv/beamsim"
+Issues = "https://github.com/jakupsv/beamsim/issues"
+Changelog = "https://github.com/jakupsv/beamsim/blob/main/CHANGELOG.md"
 
 [project.scripts]
 beamsim-run = "beamsim.run:main"
@@ -41,9 +74,34 @@ beamsim-run = "beamsim.run:main"
 [tool.setuptools.packages.find]
 where = ["src"]
 
+[tool.setuptools.package-data]
+beamsim = ["py.typed"]
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 markers = ["slow: marks tests as slow (deselect with '-m \"not slow\"')"]
+filterwarnings = [
+    "ignore::DeprecationWarning:hydra.*",
+    "ignore::DeprecationWarning:omegaconf.*",
+]
+
+[tool.coverage.run]
+branch = true
+source = ["beamsim"]
+omit = [
+    "src/beamsim/algorithms/_dl/*",  # ML training code, run separately
+]
+
+[tool.coverage.report]
+precision = 1
+show_missing = true
+skip_covered = false
+exclude_also = [
+    "raise NotImplementedError",
+    "if TYPE_CHECKING:",
+    "if __name__ == .__main__.:",
+    "@overload",
+]
 
 [tool.ruff]
 line-length = 100
