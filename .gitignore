@@ -17,3 +17,5 @@ results/**/*.txt
 !results/.gitkeep
 outputs/
 .DS_Store
+models/*.pt
+models/*.pth

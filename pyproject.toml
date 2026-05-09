@@ -21,6 +21,10 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+dl = [
+    "torch>=2.2",
+    "tqdm>=4.65",
+]
 dev = [
     "pytest>=7",
     "pytest-xdist",

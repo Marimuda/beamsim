@@ -10,9 +10,11 @@ from beamsim.codebook import make_default_bs_codebook, make_default_ue_codebook
 
 
 def make_state():
-    return BPLMState(ue_codebook=make_default_ue_codebook(),
-                      bs_codebook=make_default_bs_codebook(),
-                      noise_amplitude=0.01)
+    return BPLMState(
+        ue_codebook=make_default_ue_codebook(),
+        bs_codebook=make_default_bs_codebook(),
+        noise_amplitude=0.01,
+    )
 
 
 @pytest.mark.parametrize("name", sorted(ALL_ALGORITHMS))
@@ -21,25 +23,26 @@ def test_algorithm_returns_valid_indices(name):
     algo = cls()
     state = make_state()
     bs_xy = np.array([10.0, 0.0])
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
     context = {
         "ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
         "bs_xy": bs_xy,
         "bs_yaw": 0.0,
+        "true_H": H,
     }
     algo.reset(state, context)
     rng = np.random.default_rng(0)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
     for m in range(50):
         k, l = algo.select_next_mbp(state, m, context)
         assert 0 <= k < state.K
         assert 0 <= l < state.L
-        H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
         state.measure(k, l, H, m, rng)
 
 
 def test_exhaustive_visits_every_pair_in_one_cycle():
     from beamsim.algorithms import Exhaustive
+
     algo = Exhaustive()
     state = make_state()
     algo.reset(state, {})
@@ -57,6 +60,7 @@ def test_ci_picks_geometry_aligned_pair():
     near the centre of their respective codebooks (closest beam to sin = 0).
     """
     from beamsim.algorithms import ContextInformation
+
     algo = ContextInformation()
     state = make_state()
     bs_xy = np.array([10.0, 0.0])
@@ -78,6 +82,7 @@ def test_ci_picks_geometry_aligned_pair():
 # NNS: hill-climbing tests (report Sec. 5.4.4, Algorithm 4)
 # ---------------------------------------------------------------------------
 
+
 def test_nns_moves_toward_best_neighbour():
     """After measuring a bright spot, NNS should queue neighbours of the OBP,
     not stay fixed at (0,0).  Verifies hill-climbing behaviour: at least one
@@ -95,8 +100,7 @@ def test_nns_moves_toward_best_neighbour():
     }
     algo.reset(state, context)
     rng = np.random.default_rng(42)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
     # Measure a few pairs so the OBP is established
@@ -143,8 +147,7 @@ def test_nns_returns_4connected_only():
     }
     algo.reset(state, context)
     rng = np.random.default_rng(7)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
     for m in range(6):
@@ -164,6 +167,7 @@ def test_nns_returns_4connected_only():
 # ---------------------------------------------------------------------------
 # Tabu: aspiration and diversification tests (report Sec. 5.4.5, Algorithm 5)
 # ---------------------------------------------------------------------------
+
 
 def test_tabu_aspiration_takes_tabu_pair_with_highest_magnitude():
     """Aspiration criterion (Glover 1989): a tabu candidate whose observed
@@ -185,12 +189,10 @@ def test_tabu_aspiration_takes_tabu_pair_with_highest_magnitude():
     algo = Tabu(tenure=20, radius=2)
     state = make_state()
     bs_xy = np.array([10.0, 0.0])
-    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
-               "bs_xy": bs_xy, "bs_yaw": 0.0}
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
     algo.reset(state, context)
     rng = np.random.default_rng(1)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
     # Warm up: measure 20 occasions so the tabu list fills up
@@ -251,12 +253,10 @@ def test_tabu_avoids_recently_selected_pairs():
     algo = Tabu(tenure=tenure, radius=2, diversification_period=0)
     state = make_state()
     bs_xy = np.array([10.0, 0.0])
-    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
-               "bs_xy": bs_xy, "bs_yaw": 0.0}
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
     algo.reset(state, context)
     rng = np.random.default_rng(3)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
     # Collect selections over 2*tenure occasions; keep the first choice
@@ -272,7 +272,7 @@ def test_tabu_avoids_recently_selected_pairs():
         pair = selections[i]
         for j in range(i + 1, min(i + tenure, len(selections))):
             assert selections[j] != pair, (
-                f"Tabu pair {pair} selected again at step {j}, only {j-i} steps "
+                f"Tabu pair {pair} selected again at step {j}, only {j - i} steps "
                 f"after first selection at step {i} (tenure={tenure})"
             )
 
@@ -280,6 +280,7 @@ def test_tabu_avoids_recently_selected_pairs():
 # ---------------------------------------------------------------------------
 # Angular prediction: gradient-sum Algorithm 3 tracking test
 # ---------------------------------------------------------------------------
+
 
 def test_angular_prediction_gradient_sum_tracks_linear_velocity():
     """Gradient-sum predictor (Algorithm 3) must track a linearly drifting beam.
@@ -323,7 +324,7 @@ def test_angular_prediction_gradient_sum_tracks_linear_velocity():
     post_warmup = 5
     for m in range(warmup, warmup + post_warmup):
         tl = true_bs_beam(m)
-        k_pred, l_pred = algo.select_next_mbp(state, m, context)
+        _k_pred, l_pred = algo.select_next_mbp(state, m, context)
         if abs(l_pred - tl) <= 1:
             hits += 1
         # Update OBP to true beam for next step
@@ -339,6 +340,7 @@ def test_angular_prediction_gradient_sum_tracks_linear_velocity():
 # ---------------------------------------------------------------------------
 # CI: LOS-aligned pair on pure-LOS noiseless channel
 # ---------------------------------------------------------------------------
+
 
 def test_ci_picks_los_pair_on_noiseless_los_channel():
     """CI must select a beam pair within 3 dB of the global best on a purely
@@ -377,8 +379,7 @@ def test_ci_picks_los_pair_on_noiseless_los_channel():
 
     k_ci, l_ci = algo.select_next_mbp(state, 0, context)
 
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=bs_yaw,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=bs_yaw, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(ue_xy, ue_yaw)
 
     rng = np.random.default_rng(0)
@@ -407,6 +408,7 @@ def test_ci_picks_los_pair_on_noiseless_los_channel():
 # MCMD: criterion-matrix audit
 # ---------------------------------------------------------------------------
 
+
 def test_mcmd_c_age_rewards_stale_entries():
     """C_age must give highest values to the least-recently-measured pairs."""
     from beamsim.algorithms import MCMD
@@ -415,12 +417,10 @@ def test_mcmd_c_age_rewards_stale_entries():
     algo = MCMD()
     state = make_state()
     bs_xy = np.array([10.0, 0.0])
-    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
-               "bs_xy": bs_xy, "bs_yaw": 0.0}
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
     algo.reset(state, context)
     rng = np.random.default_rng(5)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
     # Measure a few specific pairs so measured_at is non-uniform
@@ -436,7 +436,7 @@ def test_mcmd_c_age_rewards_stale_entries():
                 if (kk, ll) not in pairs_measured:
                     # Never-measured entries must be at least as stale
                     assert ages[kk, ll] >= ages[k, l], (
-                        f"C_age[{kk},{ll}]={ages[kk,ll]} < C_age[{k},{l}]={ages[k,l]}; "
+                        f"C_age[{kk},{ll}]={ages[kk, ll]} < C_age[{k},{l}]={ages[k, l]}; "
                         "stale never-measured entries should have maximum age"
                     )
 
@@ -449,7 +449,7 @@ def test_mcmd_weight_order_matches_fig526():
       10 m/s: Age=16%, Tabu=36%, NNS=49%  -> W_HIGH
     The weights must sum to approximately 1.0 and match those percentages.
     """
-    from beamsim.algorithms.mcmd import W_LOW, W_HIGH
+    from beamsim.algorithms.mcmd import W_HIGH, W_LOW
 
     # Verify sums — tolerance 0.02 to allow for pie-chart rounding in Fig. 5.26
     assert abs(W_LOW.sum() - 1.0) < 0.02, f"W_LOW sums to {W_LOW.sum()}, expected ~1.0"
@@ -480,12 +480,10 @@ def test_mcmd_c_nns_peaks_at_obp():
     algo = MCMD()
     state = make_state()
     bs_xy = np.array([10.0, 0.0])
-    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
-               "bs_xy": bs_xy, "bs_yaw": 0.0}
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
     algo.reset(state, context)
     rng = np.random.default_rng(9)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
     # Warm up
@@ -493,16 +491,14 @@ def test_mcmd_c_nns_peaks_at_obp():
         k, l = algo.select_next_mbp(state, m, context)
         state.measure(k, l, H, m, rng)
 
-    ck, cl = state.obp()
-    K, L = state.K, state.L
+    _ck, _cl = state.obp()
 
     # Trigger one more call so the internal NNS P-list is populated
     algo.select_next_mbp(state, 10, context)
 
     # After warmup the NNS stack should be non-empty (neighbours queued)
     assert len(algo._nns_stack) > 0, (
-        "MCMD internal NNS P-list is empty after warmup; "
-        "C_nns (Eq. 5.28) would be all-zero"
+        "MCMD internal NNS P-list is empty after warmup; C_nns (Eq. 5.28) would be all-zero"
     )
 
     # All P-list entries should be 4-connected neighbours (Chebyshev dist <= 1)
@@ -518,6 +514,7 @@ def test_mcmd_c_nns_peaks_at_obp():
 # ---------------------------------------------------------------------------
 # New predecessor-fidelity tests
 # ---------------------------------------------------------------------------
+
 
 def test_nns_random_seed_varies_across_trials():
     """NNS reset() must draw a random seed so different trials start differently.
@@ -558,6 +555,93 @@ def test_tabu_default_tenure_is_20():
     )
 
 
+# ---------------------------------------------------------------------------
+# Perfect knowledge: oracle matches exhaustive best (k, l)
+# ---------------------------------------------------------------------------
+
+
+def test_perfect_matches_exhaustive_best_pair():
+    """Perfect must return the same (k, l) as the noiseless argmax over all pairs.
+
+    A single deterministic LOS channel is used so the true best pair is
+    unambiguous.  Perfect must pick it on every step, giving SNR >= exhaustive
+    OBP at all times (they are equal on the first step when exhaustive has
+    measured every entry; here we check the noiseless gain directly).
+    """
+    from beamsim.algorithms import Perfect
+    from beamsim.channel import FreeSpaceLosChannel
+
+    bs_xy = np.array([10.0, 0.0])
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    state = make_state()
+    context = {
+        "ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
+        "bs_xy": bs_xy,
+        "bs_yaw": 0.0,
+        "true_H": H,
+    }
+    algo = Perfect()
+    algo.reset(state, context)
+
+    # Ground-truth best pair via noiseless gain matrix
+    W = state.ue_codebook.matrix
+    F = state.bs_codebook.matrix
+    gains = np.abs(W.conj().T @ H @ F)
+    best_k, best_l = np.unravel_index(np.argmax(gains), gains.shape)
+
+    for m in range(5):
+        k, l = algo.select_next_mbp(state, m, context)
+        assert (k, l) == (int(best_k), int(best_l)), (
+            f"Step {m}: Perfect returned ({k},{l}), expected ({best_k},{best_l})"
+        )
+
+
+# ---------------------------------------------------------------------------
+# NNSBSSequential: round-robin BS stride test (report Sec. 6.5, Fig. 6.7)
+# ---------------------------------------------------------------------------
+
+
+def test_nns_bs_sequential_l_follows_round_robin_stride():
+    """BS beam index must follow (l + 7) % L round-robin with default stride=7.
+
+    For L=32, the sequence of returned l values across 200 steps must be
+    exactly [7, 14, 21, 28, 3, 10, ...] (mod 32) — a fixed stride-7 scan
+    independent of UE NNS behaviour.
+    """
+    from beamsim.algorithms.nns_bs_sequential import NNSBSSequential
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = NNSBSSequential(bs_stride=7)
+    state = make_state()
+    bs_xy = np.array([10.0, 0.0])
+    context = {
+        "ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
+        "bs_xy": bs_xy,
+        "bs_yaw": 0.0,
+    }
+    algo.reset(state, context)
+    rng = np.random.default_rng(42)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    L = state.L  # 32
+    n_steps = 200
+    l_values = []
+    for m in range(n_steps):
+        k, l = algo.select_next_mbp(state, m, context)
+        l_values.append(l)
+        state.measure(k, l, H, m, rng)
+
+    expected = [(7 * (i + 1)) % L for i in range(n_steps)]
+    assert l_values == expected, (
+        f"BS beam sequence mismatch.\n"
+        f"First 10 got:      {l_values[:10]}\n"
+        f"First 10 expected: {expected[:10]}"
+    )
+
+
 def test_mcmd_binary_c_nns_reflects_p_list():
     """C_nns must be 1 for entries in P and 0 for entries not in P (Eq. 5.28).
 
@@ -570,12 +654,10 @@ def test_mcmd_binary_c_nns_reflects_p_list():
     algo = MCMD()
     state = make_state()
     bs_xy = np.array([10.0, 0.0])
-    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
-               "bs_xy": bs_xy, "bs_yaw": 0.0}
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
     algo.reset(state, context)
     rng = np.random.default_rng(42)
-    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0,
-                              n_bs_elements=16, n_ue_elements=4)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
     H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
 
     # Run enough steps to establish a non-trivial NNS centre and P-list
@@ -603,10 +685,368 @@ def test_mcmd_binary_c_nns_reflects_p_list():
         for k in range(K):
             for l in range(L):
                 if (k, l) in p_set:
-                    assert C_nns[k, l] == 1.0, (
-                        f"C_nns[{k},{l}]=0 but ({k},{l}) is in P-list"
-                    )
+                    assert C_nns[k, l] == 1.0, f"C_nns[{k},{l}]=0 but ({k},{l}) is in P-list"
                 else:
-                    assert C_nns[k, l] == 0.0, (
-                        f"C_nns[{k},{l}]>0 but ({k},{l}) is not in P-list"
-                    )
+                    assert C_nns[k, l] == 0.0, f"C_nns[{k},{l}]>0 but ({k},{l}) is not in P-list"
+
+
+# ---------------------------------------------------------------------------
+# UCB1: cold-start coverage and exploitation tests
+# ---------------------------------------------------------------------------
+
+
+def test_ucb1_explores_all_arms_in_first_KL_steps():
+    """UCB1 must pull every arm exactly once before applying the UCB rule.
+
+    The first K*L selections must cover all (k, l) pairs (cold-start phase).
+    """
+    from beamsim.algorithms.ucb1 import UCB1
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = UCB1()
+    state = make_state()
+    K, L = state.K, state.L
+    bs_xy = np.array([10.0, 0.0])
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
+    algo.reset(state, context)
+    rng = np.random.default_rng(0)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    visited: set[tuple[int, int]] = set()
+    for m in range(K * L):
+        k, l = algo.select_next_mbp(state, m, context)
+        visited.add((k, l))
+        state.measure(k, l, H, m, rng)
+
+    assert len(visited) == K * L, (
+        f"UCB1 covered only {len(visited)}/{K * L} arms in first {K * L} steps"
+    )
+
+
+def test_ucb1_eventually_exploits_max_arm():
+    """UCB1 must converge to the best arm on a stationary environment.
+
+    A synthetic BPLM where arm (0,0) always yields reward 10x higher than
+    all others.  After K*L cold-start + 3*K*L more steps, arm (0,0) must be
+    picked more than 50% of the time.
+    """
+    from beamsim.algorithms.ucb1 import UCB1
+    from beamsim.codebook import Codebook
+
+    K, L = 4, 8
+    ue_cb = Codebook(n_elements=4, n_beams=K)
+    bs_cb = Codebook(n_elements=16, n_beams=L)
+    state = BPLMState(ue_codebook=ue_cb, bs_codebook=bs_cb, noise_amplitude=0.01)
+    algo = UCB1()
+    algo.reset(state, {})
+
+    rng = np.random.default_rng(99)
+    n_cold = K * L
+    n_exploit = 3 * K * L
+    best_count = 0
+
+    for m in range(n_cold + n_exploit):
+        k, l = algo.select_next_mbp(state, m, {})
+        # Synthetic reward: (0,0) = high, others = low
+        reward = 10.0 if (k, l) == (0, 0) else 0.1 + rng.random() * 0.1
+        state.observations[k, l] = complex(reward)
+        state.measured_at[k, l] = m
+        if m >= n_cold and (k, l) == (0, 0):
+            best_count += 1
+
+    rate = best_count / n_exploit
+    assert rate > 0.50, (
+        f"UCB1 exploited best arm only {rate:.1%} of post-cold-start steps "
+        f"(expected >50%); best_count={best_count}/{n_exploit}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# ThompsonGaussian: validity and seed-isolation tests
+# ---------------------------------------------------------------------------
+
+
+def test_thompson_returns_valid_index():
+    """ThompsonGaussian must return a valid (k, l) pair on every step."""
+    from beamsim.algorithms.thompson import ThompsonGaussian
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = ThompsonGaussian()
+    state = make_state()
+    K, L = state.K, state.L
+    bs_xy = np.array([10.0, 0.0])
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
+    algo.reset(state, context)
+    rng = np.random.default_rng(7)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    for m in range(K * L + 20):
+        k, l = algo.select_next_mbp(state, m, context)
+        assert 0 <= k < K, f"Thompson k={k} out of [0, {K})"
+        assert 0 <= l < L, f"Thompson l={l} out of [0, {L})"
+        state.measure(k, l, H, m, rng)
+
+
+def test_thompson_seed_isolation():
+    """Two ThompsonGaussian instances reset with the same trial_seed must produce
+    the same sequence; reset with different trial_seeds must diverge."""
+    from beamsim.algorithms.thompson import ThompsonGaussian
+    from beamsim.codebook import Codebook
+
+    K, L = 4, 8
+    ue_cb = Codebook(n_elements=4, n_beams=K)
+    bs_cb = Codebook(n_elements=16, n_beams=L)
+
+    def make_fresh(seed: int):
+        state = BPLMState(ue_codebook=ue_cb, bs_codebook=bs_cb, noise_amplitude=0.01)
+        algo = ThompsonGaussian()
+        algo.reset(state, {"trial_seed": seed})
+        return algo, state
+
+    n_steps = K * L + 30
+
+    # Same seed → identical sequences
+    algo_a, state_a = make_fresh(99)
+    algo_b, state_b = make_fresh(99)
+    rng = np.random.default_rng(0)
+    sel_a, sel_b = [], []
+    for m in range(n_steps):
+        ka, la = algo_a.select_next_mbp(state_a, m, {})
+        kb, lb = algo_b.select_next_mbp(state_b, m, {})
+        r = float(rng.random())
+        state_a.observations[ka, la] = complex(r)
+        state_b.observations[kb, lb] = complex(r)
+        sel_a.append((ka, la))
+        sel_b.append((kb, lb))
+    assert sel_a == sel_b, "ThompsonGaussian with same trial_seed produced different sequences"
+
+    # Different trial_seeds → sequences must diverge (regression for the seed=42 bug)
+    horizon = K * L + 50
+    algo_t0, state_t0 = make_fresh(12345 ^ 0)
+    algo_t1, state_t1 = make_fresh(12345 ^ 1)
+    rng2 = np.random.default_rng(1)
+    seq_t0, seq_t1 = [], []
+    for m in range(horizon):
+        k0, l0 = algo_t0.select_next_mbp(state_t0, m, {})
+        k1, l1 = algo_t1.select_next_mbp(state_t1, m, {})
+        r = float(rng2.random())
+        state_t0.observations[k0, l0] = complex(r)
+        state_t1.observations[k1, l1] = complex(r)
+        seq_t0.append((k0, l0))
+        seq_t1.append((k1, l1))
+    assert seq_t0 != seq_t1, (
+        "ThompsonGaussian produced identical (k,l) sequences for two different "
+        "trial_seeds — the seed=42 regression is back"
+    )
+
+
+# ---------------------------------------------------------------------------
+# HBM: hierarchical codebook tests (Alkhateeb et al. 2014)
+# ---------------------------------------------------------------------------
+
+
+def test_hbm_completes_coarse_sweep_in_M_steps():
+    """First n_coarse steps must cover every coarse BS sector exactly once.
+
+    With coarse_factor=4 and L=32, there are 8 coarse sectors: 0,4,8,...,28.
+    The first 8 calls to select_next_mbp must return exactly those BS beams.
+    """
+    from beamsim.algorithms.hbm import HBM
+    from beamsim.channel import FreeSpaceLosChannel
+
+    coarse_factor = 4
+    algo = HBM(coarse_factor=coarse_factor, refresh_every=1000)
+    state = make_state()
+    L = state.L  # 32
+    expected_coarse = set(range(0, L, coarse_factor))  # {0,4,8,...,28}
+    n_coarse = len(expected_coarse)
+
+    bs_xy = np.array([10.0, 0.0])
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
+    algo.reset(state, context)
+    rng = np.random.default_rng(0)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    coarse_ls: list[int] = []
+    for m in range(n_coarse):
+        k, l = algo.select_next_mbp(state, m, context)
+        coarse_ls.append(l)
+        state.measure(k, l, H, m, rng)
+
+    assert set(coarse_ls) == expected_coarse, (
+        f"Coarse sweep returned BS beams {sorted(set(coarse_ls))}, "
+        f"expected {sorted(expected_coarse)}"
+    )
+
+
+def test_hbm_returns_valid_index_under_random_bplm():
+    """HBM must always return indices in [0, K) x [0, L) for random observations."""
+    from beamsim.algorithms.hbm import HBM
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = HBM(coarse_factor=4, refresh_every=50)
+    state = make_state()
+    bs_xy = np.array([10.0, 0.0])
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
+    algo.reset(state, context)
+    rng = np.random.default_rng(42)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    K, L = state.K, state.L
+    for m in range(200):
+        k, l = algo.select_next_mbp(state, m, context)
+        assert 0 <= k < K, f"step {m}: k={k} out of [0, {K})"
+        assert 0 <= l < L, f"step {m}: l={l} out of [0, {L})"
+        state.measure(k, l, H, m, rng)
+
+
+# ---------------------------------------------------------------------------
+# OMP: compressive beam alignment tests (Marzi et al. 2016)
+# ---------------------------------------------------------------------------
+
+
+def test_omp_solves_known_sparse_signal():
+    """OMP sub-routine must recover a 2-sparse vector from noiseless measurements.
+
+    A random Gaussian sensing matrix A (shape M x N with M < N) and a
+    2-sparse signal x are constructed.  OMP must recover the correct support
+    and achieve near-zero residual.
+
+    This tests the rolled OMP algorithm (OMPCompressive._omp) directly,
+    independently of the BPLMState measurement pipeline.
+    """
+    from beamsim.algorithms.omp_compressive import OMPCompressive
+
+    rng = np.random.default_rng(42)
+    N = 64  # unknown dimension (e.g., n_ue * n_bs = 4*16)
+    M = 32  # measurements (> sparsity but << N)
+    sparsity = 2
+
+    # Construct a Gaussian measurement matrix (RIP-satisfying with high probability)
+    A = (rng.standard_normal((M, N)) + 1j * rng.standard_normal((M, N))) / np.sqrt(2 * M)
+
+    # Ground-truth 2-sparse signal
+    true_support = [10, 45]
+    x_true = np.zeros(N, dtype=np.complex128)
+    x_true[true_support[0]] = 5.0 + 0j
+    x_true[true_support[1]] = 3.0 + 0.5j
+
+    y = A @ x_true  # noiseless measurements
+
+    x_hat = OMPCompressive._omp(A, y, sparsity)
+
+    # Support must match exactly on a noiseless problem with well-separated spikes
+    recovered_support = sorted(np.where(np.abs(x_hat) > 0.1)[0].tolist())
+    assert recovered_support == sorted(true_support), (
+        f"OMP recovered support {recovered_support}, expected {sorted(true_support)}"
+    )
+    # Reconstruction error should be negligible
+    residual_norm = float(np.linalg.norm(y - A @ x_hat))
+    assert residual_norm < 1e-6, (
+        f"OMP residual norm {residual_norm:.2e} exceeds 1e-6 on noiseless problem"
+    )
+
+
+def test_omp_returns_valid_index():
+    """OMPCompressive must return valid (k, l) indices on every step."""
+    from beamsim.algorithms.omp_compressive import OMPCompressive
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = OMPCompressive(measurements_per_solve=8, sparsity=2)
+    state = make_state()
+    K, L = state.K, state.L
+    bs_xy = np.array([10.0, 0.0])
+    context = {"ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0), "bs_xy": bs_xy, "bs_yaw": 0.0}
+    algo.reset(state, context)
+    rng = np.random.default_rng(13)
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+
+    for m in range(100):
+        k, l = algo.select_next_mbp(state, m, context)
+        assert 0 <= k < K, f"step {m}: k={k} out of [0, {K})"
+        assert 0 <= l < L, f"step {m}: l={l} out of [0, {L})"
+        state.measure(k, l, H, m, rng)
+
+
+# ---------------------------------------------------------------------------
+# DLPredictor: fallback and checkpoint tests
+# ---------------------------------------------------------------------------
+
+
+def test_dl_predictor_falls_back_when_no_checkpoint():
+    """DLPredictor must fall back to Exhaustive-style behaviour (valid indices)
+    when 'models/beam_predictor.pt' does not exist, with a UserWarning."""
+    import warnings
+
+    from beamsim.algorithms.dl_predictor import DLPredictor
+    from beamsim.channel import FreeSpaceLosChannel
+
+    # Point at a path that definitely does not exist
+    algo = DLPredictor(checkpoint="/tmp/nonexistent_beam_predictor_zzz.pt")
+    state = make_state()
+    bs_xy = np.array([10.0, 0.0])
+    context = {
+        "ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
+        "bs_xy": bs_xy,
+        "bs_yaw": 0.0,
+    }
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+    rng = np.random.default_rng(0)
+
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        algo.reset(state, context)
+        for m in range(20):
+            k, l = algo.select_next_mbp(state, m, context)
+            assert 0 <= k < state.K, f"k={k} out of range"
+            assert 0 <= l < state.L, f"l={l} out of range"
+            state.measure(k, l, H, m, rng)
+
+    # At least one UserWarning about missing checkpoint or torch
+    warning_texts = " ".join(str(w.message) for w in caught)
+    assert caught, "Expected at least one warning from DLPredictor fallback"
+    assert any(issubclass(w.category, UserWarning) for w in caught), (
+        f"Expected UserWarning; got: {warning_texts}"
+    )
+
+
+def test_dl_predictor_returns_valid_index_with_checkpoint():
+    """With a valid checkpoint, DLPredictor must return indices in [0,K) x [0,L).
+
+    Skipped if torch is not installed or checkpoint does not exist.
+    """
+    pytest.importorskip("torch")
+    from pathlib import Path
+
+    ckpt = Path("models/beam_predictor.pt")
+    if not ckpt.exists():
+        pytest.skip("models/beam_predictor.pt not found — run training first")
+
+    from beamsim.algorithms.dl_predictor import DLPredictor
+    from beamsim.channel import FreeSpaceLosChannel
+
+    algo = DLPredictor(checkpoint=ckpt)
+    state = make_state()
+    bs_xy = np.array([10.0, 0.0])
+    context = {
+        "ue_pose_at": lambda m: (np.array([0.0, 0.0]), 0.0),
+        "bs_xy": bs_xy,
+        "bs_yaw": 0.0,
+    }
+    ch = FreeSpaceLosChannel(bs_xy=bs_xy, bs_yaw=0.0, n_bs_elements=16, n_ue_elements=4)
+    H = ch.channel_matrix(np.array([0.0, 0.0]), 0.0)
+    rng = np.random.default_rng(7)
+
+    algo.reset(state, context)
+    # Seed enough measurements so OBP history fills the window
+    for m in range(50):
+        k, l = algo.select_next_mbp(state, m, context)
+        assert 0 <= k < state.K, f"k={k} out of range at step {m}"
+        assert 0 <= l < state.L, f"l={l} out of range at step {m}"
+        state.measure(k, l, H, m, rng)
