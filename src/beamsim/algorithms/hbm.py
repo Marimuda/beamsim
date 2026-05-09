@@ -1,13 +1,23 @@
-"""Hierarchical Beam Management (HBM) algorithm.
+"""Hierarchical Beam Management (HBM): coarse sub-sampled DFT scan + fine hill-climb.
 
-Based on: Alkhateeb, El Ayach, Leus, Heath (2014) — "Channel estimation and
-hybrid precoding for millimeter wave cellular systems."
+This is the *simple* hierarchical search used as the 3GPP NR P1/P2 reference
+in the standardisation literature: a two-level scan where the coarse level
+sub-samples the fine DFT codebook by stride ``coarse_factor``, and a fine
+NNS-style steepest-ascent runs within the winning coarse sector.
 
-Idea: a two-level codebook scan.  A coarse sub-codebook (every ``coarse_factor``-th
-BS beam, giving ``L // coarse_factor`` sectors) identifies the best sector in one
-sweep; a fine hill-climb (NNS-style steepest-ascent) then tracks within that
-sector.  The sector scan is refreshed every ``refresh_every`` steps to track
-angle drift.
+Reference (procedure):
+    Giordani, Polese, Roy, Castor, Zorzi (2019). "A Tutorial on Beam Management
+    for 3GPP NR at mmWave Frequencies." IEEE Communications Surveys & Tutorials
+    21(1), 173-196.  arXiv:1804.01908.  Sections III-A (P1 initial sweep) and
+    III-B (P2 refinement) describe exactly this two-level coarse-then-fine
+    procedure over a fixed DFT codebook.
+
+NOT a reproduction of Alkhateeb et al. (2014) "Channel estimation and hybrid
+precoding for mmWave cellular systems" — that paper designs purpose-built
+*wide-beam codewords* for each level so each coarse codeword covers a sector
+with approximately flat gain.  Here we just sub-sample the existing narrow
+DFT codebook, leaving inter-beam coverage gaps the Alkhateeb design avoids.
+A learned-codebook upgrade (HBAN / X-BM) is planned for Phase 4C.
 
 Beamspace basis: UE codeword index ``k`` is cycled uniformly; BS coarse/fine
 indices select columns of the 32-beam BS codebook.
@@ -55,7 +65,10 @@ class HBM(Algorithm):
         self._fine_stack: list[int] = []  # fine hill-climb stack (BS beam only)
         self._cycle_best_l: int = 0
         self._cycle_best_mag: float = -np.inf
-        self._rng = np.random.default_rng()
+        # Seed UE-beam-pick RNG from the trial seed so multi-trial Monte Carlo
+        # is reproducible.  Without this, np.random.default_rng() draws OS
+        # entropy and the same trial gives different traces across runs.
+        self._rng = np.random.default_rng(context.get("trial_seed"))
 
     # ------------------------------------------------------------------
     def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:

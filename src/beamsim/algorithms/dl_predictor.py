@@ -2,12 +2,37 @@
 
 Wraps BeamPredictorMLP as an Algorithm instance.  On ``reset``, lazily loads
 a pre-trained checkpoint from ``models/beam_predictor.pt`` (relative to the
-working directory, or an explicit path).  If the checkpoint is missing or
-torch is unavailable, falls back to Exhaustive with a loud warning.
+working directory, or an explicit path).  If ``require_checkpoint=True`` and
+the checkpoint is missing, ``reset`` raises ``FileNotFoundError`` so a
+benchmark cannot silently fall through to Exhaustive.  When called from
+unit tests we keep the fallback-with-warning path so the test suite can
+exercise the wrapper without a trained model.
 
-Reference (paraphrased):
-    Klautau et al. (2018), Heng et al. (2021): DL beam-selection baseline
-    uses a small MLP trained on offline exhaustive-sweep trajectories.
+Reference (modern equivalent):
+    Kim et al. (2023). "Machine Learning Based Time Domain Millimeter-Wave
+    Beam Prediction for 5G-Advanced and Beyond: Design, Analysis, and
+    Over-The-Air Experiments," IEEE J. Sel. Areas Commun. 41(6),
+    DOI: 10.1109/JSAC.2023.3275613.  Kim et al. use an LSTM on a window
+    of past RSRP measurements to predict the next-best beam pair, with
+    >50% beam-management power saving in OTA tests.
+
+We ship a *simpler* MLP variant (3 hidden layers) on a 4-step OBP-index
+window — closer to early sequence-based prediction baselines.  Phase 4C
+will replace this MLP with an LSTM trained on the same trajectories so
+the comparison is on equal footing with Kim et al.
+
+Klautau et al. 2018 ("5G MIMO Data for Machine Learning") was previously
+cited here but is **not** the right reference: that paper uses ray-tracing
+channel matrices and environment metadata as DL inputs, not a window of
+past OBP indices, and applies a different output head (top-K beam ranking).
+
+Known limitation: train/inference distribution mismatch.  Training labels
+are produced by running ``Exhaustive`` (which sweeps every (k,l) per step),
+so the OBP at training time is the argmax of a fully-populated BPLM.  At
+inference time only the most recent (k,l) is updated each step, so
+``state.obp()`` is the argmax of a stale, partially-swept BPLM.  We document
+the gap rather than papering over it; a fully online predictor (or a
+training-time policy that probes one beam per step) would close it.
 """
 
 from __future__ import annotations
@@ -42,8 +67,13 @@ class DLPredictor(Algorithm):
 
     name = "dl_predictor"
 
-    def __init__(self, checkpoint: str | Path = _DEFAULT_CHECKPOINT) -> None:
+    def __init__(
+        self,
+        checkpoint: str | Path = _DEFAULT_CHECKPOINT,
+        require_checkpoint: bool = False,
+    ) -> None:
         self._ckpt_path = Path(checkpoint)
+        self._require_checkpoint = require_checkpoint
         self._model: object | None = None
         self._L: int = 32
         self._window: int = _WINDOW
@@ -115,9 +145,15 @@ class DLPredictor(Algorithm):
             return
 
         if not self._ckpt_path.exists():
+            if self._require_checkpoint:
+                raise FileNotFoundError(
+                    f"DLPredictor: checkpoint '{self._ckpt_path}' not found and "
+                    "require_checkpoint=True. Train with: "
+                    "python -m beamsim.algorithms._dl.train"
+                )
             warnings.warn(
                 f"DLPredictor: checkpoint '{self._ckpt_path}' not found — "
-                "falling back to Exhaustive. "
+                "falling back to Exhaustive (set require_checkpoint=True to fail loudly). "
                 "Train with: python -m beamsim.algorithms._dl.train",
                 stacklevel=3,
             )

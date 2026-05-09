@@ -1,28 +1,42 @@
-"""Compressive beam alignment via Orthogonal Matching Pursuit (OMP).
+"""Compressive beam alignment via Orthogonal Matching Pursuit (OMP) on a
+codebook outer-product sensing matrix.
 
-Based on: Marzi, Ramasamy, Madhow (2016) — "Compressive channel estimation
-and tracking for large arrays in mm-wave picocells."
+Reference (formulation):
+    Alkhateeb, El Ayach, Leus, Heath (2014). "Channel estimation and hybrid
+    precoding for millimeter wave cellular systems," IEEE J. Sel. Topics
+    Signal Process. 8(5), 831-846, Section III-A.  The sensing-matrix row for
+    the i-th probe with codewords (w_{k_i}, f_{l_i}) is the codebook outer
+    product ``kron(conj(w_{k_i}), f_{l_i})`` and the unknown is the vectorised
+    channel ``vec(H)``.  Greedy recovery follows the standard OMP procedure
+    (Tropp & Gilbert 2007).
 
-Idea: the beamspace channel is sparse — only a few (k, l) pairs carry
-significant energy.  At each step one measurement y_(k,l) = w_k^H H f_l x
-is collected.  Every ``measurements_per_solve`` steps the buffer of recent
-measurements is stacked into a linear system  y = A s + n, where
-    - y ∈ C^H  (H measurements)
-    - A[i, :] = kron(f_l_i, conj(w_k_i)) ∈ C^{K*L}  — the sensing row for
-      the i-th measurement, expressed in the flattened codebook outer-product
-      (beamspace) basis.  This is equivalent to vec(w_k_i w_{k_i}^H H F) for
-      a single-path channel.
-    - s ∈ C^{K*L}  — sparse beamspace channel vector.
+NOT a reproduction of Marzi, Ramasamy, Madhow (2016) — that paper uses
+*pseudorandom-phase compressive beacons* (random ±1 RF precoder phases)
+designed to satisfy a near-RIP property and runs Newtonized OMP (NOMP) in
+the *continuous spatial-frequency* domain.  Our DFT codeword rows are highly
+mutually-coherent, so the formal compressive-recovery guarantees of Marzi
+2016 do not apply.  An upgrade to true random-phase beacons + NOMP, or to
+in-sector CS (Masoumi & Myers, IEEE TCOM 2025), is planned for Phase 4C.
 
-OMP greedy loop (rolled without sklearn):
+Pipeline
+--------
+At each step one measurement y_{(k,l)} = w_k^H H f_l x is collected.
+Every ``measurements_per_solve`` steps the buffer of recent measurements is
+stacked into a linear system  y = A s + n, where
+    - y ∈ C^M                       (M = measurements_per_solve)
+    - A[i, :] = kron(conj(w_{k_i}), f_{l_i}) ∈ C^{n_ue * n_bs}
+    - s = vec(H) ∈ C^{n_ue * n_bs}  is recovered, then projected through the
+      codebook matrices to produce beamspace gains W^H * unvec(s) * F.
+
+OMP greedy loop (rolled, no sklearn):
   Initialise residual r = y.
   For t = 1..sparsity:
-    i* = argmax |A^H r|          — column most correlated with residual
+    i* = argmax |A^H r|          — column most correlated with residual.
     Add i* to support set S.
     s_S = lstsq(A[:, S], y)      — regress y onto current support.
     r = y - A[:, S] @ s_S        — update residual.
-  The OBP is argmax_{k,l} |s[k*L+l]|.
-  Between solves, random (k, l) pairs populate the buffer.
+  Return the beamspace argmax as the OBP; alternate steps probe random pairs
+  to refill the buffer for the next solve.
 """
 
 from __future__ import annotations
@@ -56,7 +70,9 @@ class OMPCompressive(Algorithm):
         self._buf_l: list[int] = []
         self._obp_cache: tuple[int, int] | None = None
         self._pending: tuple[int, int] | None = None  # pair requested last step
-        self._rng = np.random.default_rng()
+        # Seeded from trial_seed so different trials use different probe
+        # sequences but a given (trial, algo) is reproducible across runs.
+        self._rng = np.random.default_rng(context.get("trial_seed"))
 
     # ------------------------------------------------------------------
     def select_next_mbp(self, state: BPLMState, m: int, context: dict) -> tuple[int, int]:
@@ -93,7 +109,7 @@ class OMPCompressive(Algorithm):
         # Build sensing matrix A and measurement vector y from buffered pairs.
         # Model: y[i] = w_{k_i}^H H f_{l_i} = kron(conj(w_{k_i}), f_{l_i})^T vec(H)
         # So A[i, :] = kron(conj(w_{k_i}), f_{l_i}) and s = vec(H) ∈ C^{n_ue * n_bs}.
-        # This is the standard vectorised channel CS formulation (Marzi 2016, Eq. 3).
+        # Standard codebook outer-product CS formulation; see Alkhateeb 2014 §III-A.
         n_ue = state.ue_codebook.n_elements
         n_bs = state.bs_codebook.n_elements
         N = n_ue * n_bs  # dimension of vectorised channel
