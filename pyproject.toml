@@ -139,5 +139,10 @@ warn_return_any = false
 check_untyped_defs = true
 
 [[tool.mypy.overrides]]
-module = ["numpy.*", "scipy.*", "matplotlib.*", "tqdm.*", "yaml.*"]
+# torch.* is listed because it lives behind the optional [dl] extra: CI
+# installs only [dev], so mypy must not require torch stubs to type-check
+# the rest of the package. Local developers with [dl] installed still get
+# full torch type-checking via mypy's normal resolution; this override
+# only kicks in when torch is absent from the environment.
+module = ["numpy.*", "scipy.*", "matplotlib.*", "tqdm.*", "yaml.*", "torch.*"]
 ignore_missing_imports = true
