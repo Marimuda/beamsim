@@ -786,3 +786,48 @@ class FreeSpaceLosChannel:
         a_ue = steering_vector(self.n_ue_elements, float(_wrap_pi(aoa_world - ue_yaw)))
         a_bs = steering_vector(self.n_bs_elements, float(_wrap_pi(aod_world - self.bs_yaw)))
         return np.outer(a_ue, a_bs.conj())
+
+
+@dataclass
+class PlanarFreeSpaceLosChannel:
+    """Single-LOS-component channel with Uniform Planar Array (UPA) endpoints.
+
+    Companion to :class:`FreeSpaceLosChannel` for use with
+    :class:`beamsim.codebook.PlanarCodebook`. Both UE and BS arrays are UPAs
+    in the xy-plane at half-wavelength spacing; the LOS arrival/departure
+    angles are computed from BS / UE positions and the elements are flattened
+    in row-major order (``i * n_y + j``) so the channel matrix has the
+    expected ``(n_ue_elements, n_bs_elements)`` shape that
+    :class:`beamsim.bplm.BPLMState` works with.
+
+    Elevation is treated as zero throughout (LOS in xy-plane), matching
+    MATLAB ``placodebook.m`` and the predecessor's azimuth-only scope.
+    """
+
+    bs_xy: NDArray[np.float64]
+    bs_yaw: float
+    n_bs_x: int
+    n_bs_y: int
+    n_ue_x: int
+    n_ue_y: int
+
+    @property
+    def n_bs_elements(self) -> int:
+        return self.n_bs_x * self.n_bs_y
+
+    @property
+    def n_ue_elements(self) -> int:
+        return self.n_ue_x * self.n_ue_y
+
+    def channel_matrix(
+        self, ue_xy: NDArray[np.float64], ue_yaw: float, time_s: float = 0.0
+    ) -> NDArray[np.complex128]:
+        from beamsim.codebook import planar_steering_vector
+
+        aoa_world = np.arctan2(self.bs_xy[1] - ue_xy[1], self.bs_xy[0] - ue_xy[0])
+        aod_world = np.arctan2(ue_xy[1] - self.bs_xy[1], ue_xy[0] - self.bs_xy[0])
+        a_ue = planar_steering_vector(self.n_ue_x, self.n_ue_y, float(_wrap_pi(aoa_world - ue_yaw)))
+        a_bs = planar_steering_vector(
+            self.n_bs_x, self.n_bs_y, float(_wrap_pi(aod_world - self.bs_yaw))
+        )
+        return np.outer(a_ue, a_bs.conj())

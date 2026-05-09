@@ -24,6 +24,8 @@ def test_public_api_is_complete():
         "Codebook",
         "Experiment",
         "FreeSpaceLosChannel",
+        "PlanarCodebook",
+        "PlanarFreeSpaceLosChannel",
         "Track",
         "TrialResult",
         "__version__",

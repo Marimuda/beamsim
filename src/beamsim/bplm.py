@@ -7,7 +7,7 @@ from dataclasses import dataclass
 import numpy as np
 from numpy.typing import NDArray
 
-from beamsim.codebook import Codebook
+from beamsim.codebook import Codebook, PlanarCodebook
 
 
 @dataclass
@@ -16,10 +16,15 @@ class BPLMState:
 
     The simulator updates exactly one entry per measurement occasion;
     elsewhere the entries reflect whatever was last measured at that pair.
+
+    Either codebook side can be a :class:`Codebook` (cosine-spaced ULA) or a
+    :class:`PlanarCodebook` (uniform planar array): both expose the same
+    ``n_beams``, ``codeword(k)``, and ``theta`` interface that the BPLM
+    measurement and the algorithms rely on.
     """
 
-    ue_codebook: Codebook
-    bs_codebook: Codebook
+    ue_codebook: Codebook | PlanarCodebook
+    bs_codebook: Codebook | PlanarCodebook
     noise_amplitude: float = 1e-3  # sqrt of noise variance, sets the noise floor
 
     def __post_init__(self) -> None:

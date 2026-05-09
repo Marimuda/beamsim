@@ -15,8 +15,13 @@ adapter over :func:`beamsim.run.run_from_config`.
 """
 
 from beamsim.bplm import BPLMState
-from beamsim.channel import ChannelParams, ChannelRealisation, FreeSpaceLosChannel
-from beamsim.codebook import Codebook
+from beamsim.channel import (
+    ChannelParams,
+    ChannelRealisation,
+    FreeSpaceLosChannel,
+    PlanarFreeSpaceLosChannel,
+)
+from beamsim.codebook import Codebook, PlanarCodebook
 from beamsim.geometry import Track
 from beamsim.runner import Experiment, TrialResult, run_experiment, save_experiment
 
@@ -29,6 +34,8 @@ __all__ = [
     "Codebook",
     "Experiment",
     "FreeSpaceLosChannel",
+    "PlanarCodebook",
+    "PlanarFreeSpaceLosChannel",
     "Track",
     "TrialResult",
     "__version__",
