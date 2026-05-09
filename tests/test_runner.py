@@ -74,9 +74,10 @@ class TestTrialResult:
         assert isinstance(result, TrialResult)
         for algo in exp.algorithms:
             assert result.snr_db[algo].shape == (exp.n_steps,), f"snr_db[{algo}] shape mismatch"
-            assert result.obp_history[algo].shape == (exp.n_steps, 2), (
-                f"obp_history[{algo}] shape mismatch"
-            )
+            assert result.obp_history[algo].shape == (
+                exp.n_steps,
+                2,
+            ), f"obp_history[{algo}] shape mismatch"
 
     def test_all_finite(self):
         exp = _make_experiment()
@@ -228,3 +229,57 @@ class TestHydraConfig:
         assert len(npz_files) == 2, f"expected 2 .npz files, got {npz_files}"
         data = np.load(str(npz_files[0]))
         assert "snr_db/exhaustive" in data or any(k.startswith("snr_db/") for k in data.files)
+
+    def test_unknown_sweep_variable_raises(self, tmp_path):
+        """An invalid sweep.variable must raise ValueError with a helpful message."""
+        from pathlib import Path
+
+        import pytest
+        from hydra import compose, initialize_config_dir
+
+        from beamsim.run import run_from_config
+
+        configs_dir = str(Path(__file__).parent.parent / "configs")
+        with initialize_config_dir(
+            config_dir=configs_dir, version_base="1.3", job_name="test_invalid_sweep"
+        ):
+            cfg = compose(
+                config_name="rotational",
+                overrides=[
+                    "run.n_trials=1",
+                    "run.n_steps=10",
+                    f"run.output_path={tmp_path}",
+                    "sweep.variable=nonsense_variable",
+                    "sweep.sweep_values=[1]",
+                ],
+            )
+
+        with pytest.raises(ValueError, match="Unknown sweep variable"):
+            run_from_config(cfg)
+
+    def test_unknown_channel_kind_raises(self, tmp_path):
+        """An invalid scenario.channel_kind must raise ValueError."""
+        from pathlib import Path
+
+        import pytest
+        from hydra import compose, initialize_config_dir
+
+        from beamsim.run import run_from_config
+
+        configs_dir = str(Path(__file__).parent.parent / "configs")
+        with initialize_config_dir(
+            config_dir=configs_dir, version_base="1.3", job_name="test_invalid_channel"
+        ):
+            cfg = compose(
+                config_name="rotational",
+                overrides=[
+                    "run.n_trials=1",
+                    "run.n_steps=10",
+                    f"run.output_path={tmp_path}",
+                    "scenario.channel_kind=does_not_exist",
+                    "sweep.sweep_values=[5]",
+                ],
+            )
+
+        with pytest.raises(ValueError, match="Unknown channel_kind"):
+            run_from_config(cfg)
