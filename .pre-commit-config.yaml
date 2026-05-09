@@ -1,13 +1,30 @@
 repos:
-  # Ruff: fast lint + format (replaces isort, pyupgrade, flake8)
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.5.0
+  # Repository hygiene: whitespace, EOF, large files, private keys, syntax checks.
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v4.6.0
     hooks:
-      - id: ruff
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-json
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=512]
+      - id: detect-private-key
+      - id: mixed-line-ending
+        args: [--fix=lf]
+
+  # Ruff: fast lint + format (replaces isort, pyupgrade, flake8).
+  # Keep this rev in sync with the ruff version installed via [project.optional-dependencies.dev].
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.0
+    hooks:
+      - id: ruff-check
         args: [--fix]
       - id: ruff-format
 
-  # mypy: type checking (local so it uses the project's installed stubs)
+  # mypy: type checking (local so it uses the project's installed stubs).
   - repo: local
     hooks:
       - id: mypy
@@ -18,7 +35,7 @@ repos:
         args: [src/beamsim/]
         pass_filenames: false
 
-  # pytest fast subset: skip slow/MC tests
+  # pytest fast subset: skip slow/MC tests. Runs at pre-push only.
   - repo: local
     hooks:
       - id: pytest-fast
