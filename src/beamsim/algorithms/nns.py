@@ -59,8 +59,11 @@ class NNS(Algorithm):
     # ------------------------------------------------------------------
 
     def reset(self, state: BPLMState, context: dict) -> None:
-        # Random initial seed per trial (Algorithm 4, line 2: "kb, lb <- Random")
-        rng = np.random.default_rng()
+        # Random initial seed per trial (Algorithm 4, line 2: "kb, lb <- Random").
+        # Seed the RNG from the trial seed so two NNS instances given the same
+        # trial seed start at the same (k_b, l_b) — preserving the runner's
+        # common-random-numbers contract across algorithms within a trial.
+        rng = np.random.default_rng(int(context.get("trial_seed", 0)))
         self._kb: int = int(rng.integers(0, state.K))
         self._lb: int = int(rng.integers(0, state.L))
         self._stack: list[tuple[int, int]] = []

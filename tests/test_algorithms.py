@@ -516,28 +516,39 @@ def test_mcmd_c_nns_peaks_at_obp():
 # ---------------------------------------------------------------------------
 
 
-def test_nns_random_seed_varies_across_trials():
-    """NNS reset() must draw a random seed so different trials start differently.
+def test_nns_random_seed_varies_across_trial_seeds():
+    """NNS reset() must derive a random seed from context['trial_seed'] so
+    different trials start at different (k_b, l_b) under common random
+    numbers, while two NNS instances given the same trial_seed start at
+    the same point.
 
-    Algorithm 4 (thesis) line 2: kb, lb <- Random.  Two independent resets
-    should produce different starting pairs with very high probability
-    (probability of collision = 1/(K*L) << 1 for any reasonable codebook).
+    Algorithm 4 (thesis) line 2: kb, lb <- Random. The runner threads a
+    distinct seed per Monte Carlo trial; NNS must consume that seed so
+    its initialisation respects the CRN contract.
     """
     from beamsim.algorithms import NNS
 
     algo = NNS()
     state = make_state()
-    context = {}
 
+    # 20 trial seeds → at least 2 distinct (k_b, l_b) pairs (collision
+    # probability per pair ≈ 1/(K*L), so 20 distinct seeds almost surely
+    # cover ≥ 2 starting points).
     seeds = set()
-    for _ in range(20):
-        algo.reset(state, context)
+    for trial_seed in range(20):
+        algo.reset(state, {"trial_seed": trial_seed})
         seeds.add((algo._kb, algo._lb))
-
     assert len(seeds) > 1, (
-        f"NNS reset() produced the same seed ({algo._kb},{algo._lb}) across "
-        "20 independent resets; random initialisation is not working"
+        f"NNS reset() produced only {seeds} across 20 distinct trial seeds; "
+        "trial-seed-driven initialisation is not working"
     )
+
+    # Same trial_seed → same start (CRN contract).
+    algo_a = NNS()
+    algo_b = NNS()
+    algo_a.reset(state, {"trial_seed": 7})
+    algo_b.reset(state, {"trial_seed": 7})
+    assert (algo_a._kb, algo_a._lb) == (algo_b._kb, algo_b._lb)
 
 
 def test_tabu_default_tenure_is_20():
