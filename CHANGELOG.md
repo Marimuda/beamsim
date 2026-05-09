@@ -51,8 +51,8 @@ exposed all of these but the Python re-implementation did not.
   expected-public-API set updated to match.
 - `docs/MATLAB_PARITY.md` updated to mark the resolved entries; the
   full TR 38.901 cluster channel (`ChannelRealisation`) still uses
-  ULA steering internally and is tracked under
-  [`docs/ROADMAP.md`](docs/ROADMAP.md) for a future UPA extension.
+  ULA steering internally and is tracked under `docs/ROADMAP.md`
+  for a future UPA extension.
 
 ### Note on library choice
 
