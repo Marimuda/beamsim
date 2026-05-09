@@ -1,0 +1,26 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite it as below."
+title: "beamsim — Geometry-based mmWave beam-alignment simulator"
+abstract: >-
+  beamsim reproduces the four figures of the journal-paper reformulation of
+  the predecessor MSc work "Beam alignment methods for terminals in
+  millimeter-wave wireless networks" (Aalborg, 2018). It implements a
+  simplified 3GPP TR 38.901 cluster-delay-line generator at 28 GHz and
+  evaluates exhaustive, NNS, tabu, angular-prediction, context-information,
+  and MCMD beam-alignment policies under common random numbers.
+type: software
+authors:
+  - given-names: jakupsv
+    email: jakupsv@setur.fo
+version: "0.1.0"
+date-released: "2026-05-09"
+license: MIT
+repository-code: "https://github.com/jakupsv/beamsim"
+url: "https://github.com/jakupsv/beamsim"
+keywords:
+  - mmwave
+  - beam-alignment
+  - 5G
+  - "3GPP TR 38.901"
+  - simulation
+  - reproducibility
