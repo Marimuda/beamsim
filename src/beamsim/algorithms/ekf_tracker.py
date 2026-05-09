@@ -115,9 +115,7 @@ class EKFTracker(Algorithm):
         self._Q = np.diag([sa**2 * dt, sa**2 * dt, sr**2 * dt, sr**2 * dt])
 
         # Observation matrix H: angle observation only.
-        self._H = np.array(
-            [[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=np.float64
-        )
+        self._H = np.array([[1.0, 0.0, 0.0, 0.0], [0.0, 1.0, 0.0, 0.0]], dtype=np.float64)
 
         # Observation noise: scale codebook spacing by floor factor.
         ue_theta = state.ue_codebook.theta

@@ -87,6 +87,5 @@ except ImportError:
 
         def __init__(self, *args: object, **kwargs: object) -> None:
             raise ImportError(
-                "torch is required for BeamPredictorLSTM. "
-                "Install with: pip install -e .[dl]"
+                "torch is required for BeamPredictorLSTM. Install with: pip install -e .[dl]"
             )
